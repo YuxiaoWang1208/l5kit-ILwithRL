@@ -69,6 +69,8 @@ def forward(data, model, device, criterion):
     target_availabilities = data["target_availabilities"].unsqueeze(-1).to(device)
     targets = data["target_positions"].to(device)
     # Forward pass
+    # inputs ~ (12, 5, 224, 224), (batch_size, max_num_steps, image_x, image_y)
+    # outputs ~ (12, 50, 2), (batch_size, future_num_frames, xy)
     outputs = model(inputs).reshape(targets.shape)
     loss = criterion(outputs, targets)
     # not all the output steps are valid, but we can filter them out from the loss using availabilities

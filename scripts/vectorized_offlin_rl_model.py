@@ -7,13 +7,13 @@ from torch import nn
 
 from l5kit.planning.vectorized.open_loop_model import VectorizedModel
 from l5kit.planning.vectorized.common import build_target_normalization, pad_avail, pad_points
-# from .global_graph import MultiheadAttentionGlobalHead, VectorizedEmbedding
+from l5kit.planning.vectorized.global_graph import MultiheadAttentionGlobalHead, VectorizedEmbedding
 # from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
 
 from torch import nn
 
 
-class VectorizedUnrollModel(VectorizedModel):
+class VectorOfflineRLModel(VectorizedModel):
     """ Vectorized closed-loop planning model.
     """
 
@@ -54,6 +54,23 @@ class VectorizedUnrollModel(VectorizedModel):
             disable_other_agents,
             disable_map,
             disable_lane_boundaries,
+        )
+
+        num_outputs = len(weights_scaling)
+        num_timesteps = num_targets // num_outputs
+
+        if self._d_global != self._d_local:
+            self.global_from_local = nn.Linear(self._d_local, self._d_global)
+
+        # default values: num_timesteps = 1, num_outputs = 3
+        self.global_head = MultiheadAttentionGlobalHead(
+            self._d_global, num_timesteps, num_outputs, dropout=self._global_head_dropout
+        )
+
+        # Todo Dim for prediction outputs?
+        num_other_agent = 30
+        self.global_prediction_head = MultiheadAttentionGlobalHead(
+            self._d_global, num_timesteps, num_outputs * num_other_agent, dropout=self._global_head_dropout
         )
 
 
@@ -98,7 +115,7 @@ class VectorizedUnrollModel(VectorizedModel):
         lane_bdry_len = data_batch["lanes"].shape[1]
 
         # call the model with these features
-        outputs, attns = self.model_call(
+        outputs, attns, all_other_agent_prediction = self.model_call(
             agents_polys, map_polys, agents_availabilities, map_availabilities, type_embedding, lane_bdry_len
         )
 
@@ -111,14 +128,28 @@ class VectorizedUnrollModel(VectorizedModel):
             if self.criterion is None:
                 raise NotImplementedError("Loss function is undefined.")
 
-            xy = data_batch["target_positions"]
-            yaw = data_batch["target_yaws"]
+            xy = data_batch["target_positions"]  # ~ (12, 12, 2)
+            yaw = data_batch["target_yaws"]  # ~ (12, 12, 1)
             if self.normalize_targets:
                 xy /= self.xy_scale
-            targets = torch.cat((xy, yaw), dim=-1)
+            targets = torch.cat((xy, yaw), dim=-1)  # ~ (12, 12, 3), (batch_size, timestamp, feature_num)
             target_weights = data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling
-            loss = torch.mean(self.criterion(outputs, targets) * target_weights)
-            train_dict = {"loss": loss}
+
+            # todo add other agents
+            xy_other = data_batch["all_other_agents_future_positions"]  # ~ (12, 30, 12, 2)
+            yaw_other = data_batch["all_other_agents_future_yaws"]  # ~ (12, 30, 12, 1)
+            if self.normalize_targets:
+                xy_other /= self.xy_scale
+            all_other_agents_targets = torch.cat((xy_other, yaw_other), dim=-1)  # ~ (12, 30, 12, 3)
+            all_other_agents_targets_weights = data_batch["all_other_agents_future_availability"].unsqueeze(-1)
+
+            loss_imitate = torch.mean(self.criterion(outputs, targets) * target_weights)
+            loss_other_agent_pred = torch.mean(
+                self.criterion(all_other_agent_prediction, all_other_agents_targets) * all_other_agents_targets_weights)
+
+            loss = loss_imitate + loss_other_agent_pred
+
+            train_dict = {"loss": loss, "loss_imitate": loss_imitate, "loss_other_agent_pred": loss_other_agent_pred}
             return train_dict
         else:
             pred_positions, pred_yaws = outputs[..., :2], outputs[..., 2:3]
@@ -181,5 +212,17 @@ class VectorizedUnrollModel(VectorizedModel):
         invalid_polys[:, 0] = 0  # make AoI always available in global graph
 
         # call and return global graph
+        # all_embs ~ (81, 12, 256), invalid_polys ~ (12, 81)
+        # outputs ~ (12, 1, 3), attns ~ (12, 1, 81)
         outputs, attns = self.global_head(all_embs, type_embedding, invalid_polys)
-        return outputs, attns
+
+        batch_size, future_frames, agent_feature = outputs.shape
+
+
+        all_other_agent_prediction, attns_prediction = self.global_prediction_head(all_embs, type_embedding, invalid_polys)
+        # all_other_agent_prediction ~ (12, 30, 1, 4)
+        all_other_agent_prediction = all_other_agent_prediction.reshape(batch_size, future_frames, agent_feature, -1)
+        # ~ (batch_size, num_all_other_agents, future_frames, agent_feature)
+        all_other_agent_prediction = all_other_agent_prediction.permute(0, 3, 1, 2)
+
+        return outputs, attns, all_other_agent_prediction
