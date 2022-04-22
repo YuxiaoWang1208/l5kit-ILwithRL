@@ -1,7 +1,10 @@
-from typing import Dict
-from typing import List
+from typing import Dict,  Optional
+from typing import List, Tuple
 
 import torch
+import torch.nn.functional as F
+from torch import nn
+
 from l5kit.planning.vectorized.open_loop_model import VectorizedModel
 from l5kit.planning.vectorized.common import build_target_normalization, pad_avail, pad_points
 # from .global_graph import MultiheadAttentionGlobalHead, VectorizedEmbedding
@@ -99,6 +102,10 @@ class VectorizedUnrollModel(VectorizedModel):
             agents_polys, map_polys, agents_availabilities, map_availabilities, type_embedding, lane_bdry_len
         )
 
+        # call the prediction model
+
+
+
         # calculate loss or return predicted position for inference
         if self.training:
             if self.criterion is None:
@@ -123,3 +130,56 @@ class VectorizedUnrollModel(VectorizedModel):
                 eval_dict["attention_weights"] = attns
             return eval_dict
 
+    def model_call(
+            self,
+            agents_polys: torch.Tensor,
+            static_polys: torch.Tensor,
+            agents_avail: torch.Tensor,
+            static_avail: torch.Tensor,
+            type_embedding: torch.Tensor,
+            lane_bdry_len: int,
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """ Encapsulates calling the global_head (TODO?) and preparing needed data.
+
+        :param agents_polys: dynamic elements - i.e. vectors corresponding to agents
+        :param static_polys: static elements - i.e. vectors corresponding to map elements
+        :param agents_avail: availability of agents
+        :param static_avail: availability of map elements
+        :param type_embedding:
+        :param lane_bdry_len:
+        """
+        # Standardize inputs
+        agents_polys_feats = torch.cat(
+            [agents_polys[:, :1] / self.agent_std, agents_polys[:, 1:] / self.other_agent_std], dim=1
+        )
+        static_polys_feats = static_polys / self.other_agent_std
+
+        all_polys = torch.cat([agents_polys_feats, static_polys_feats], dim=1)
+        all_avail = torch.cat([agents_avail, static_avail], dim=1)
+
+        # Embed inputs, calculate positional embedding, call local subgraph
+        all_embs, invalid_polys = self.embed_polyline(all_polys, all_avail)
+        if hasattr(self, "global_from_local"):
+            all_embs = self.global_from_local(all_embs)
+
+        # transformer - TODO?
+        all_embs = F.normalize(all_embs, dim=-1) * (self._d_global ** 0.5)
+        all_embs = all_embs.transpose(0, 1)
+
+        other_agents_len = agents_polys.shape[1] - 1
+
+        # disable certain elements on demand
+        if self.disable_other_agents:
+            invalid_polys[:, 1: (1 + other_agents_len)] = 1  # agents won't create attention
+
+        if self.disable_map:  # lanes (mid), crosswalks, and lanes boundaries.
+            invalid_polys[:, (1 + other_agents_len):] = 1  # lanes won't create attention
+
+        if self.disable_lane_boundaries:
+            type_embedding = type_embedding[:-lane_bdry_len]
+
+        invalid_polys[:, 0] = 0  # make AoI always available in global graph
+
+        # call and return global graph
+        outputs, attns = self.global_head(all_embs, type_embedding, invalid_polys)
+        return outputs, attns
