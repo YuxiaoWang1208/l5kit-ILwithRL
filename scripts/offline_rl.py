@@ -1,5 +1,5 @@
 import os
-
+# from pycharm
 from matplotlib import pyplot as plt
 import numpy as np
 import torch
@@ -14,6 +14,15 @@ from l5kit.dataset import EgoDatasetVectorized
 from l5kit.planning.vectorized.closed_loop_model import VectorizedUnrollModel
 from l5kit.planning.vectorized.open_loop_model import VectorizedModel
 from l5kit.vectorization.vectorizer_builder import build_vectorizer
+
+import sys
+from pathlib import Path
+project_path = str(Path(__file__).parents[1])
+print("project path: ", project_path)
+sys.path.append(project_path)
+print(sys.path)
+
+from scripts.vectorized_offlin_rl_model import VectorOfflineRLModel
 
 
 # prepare data path and load cfg
@@ -43,9 +52,11 @@ print(train_dataset)
 
 URBAN_DRIVER = "Urban Driver"
 OPEN_LOOP_PLANNER = "Open Loop Planner"
+OFFLINE_RL_PLANNER = "Offline RL Planner"
 
-
-model_name = URBAN_DRIVER
+# model_name = URBAN_DRIVER
+# model_name = OPEN_LOOP_PLANNER
+model_name = OFFLINE_RL_PLANNER
 
 weights_scaling = [1.0, 1.0, 1.0]
 
@@ -71,6 +82,18 @@ if model_name == URBAN_DRIVER:
 
 elif model_name == OPEN_LOOP_PLANNER:
     model = VectorizedModel(
+        history_num_frames_ego=cfg["model_params"]["history_num_frames_ego"],
+        history_num_frames_agents=cfg["model_params"]["history_num_frames_agents"],
+        num_targets=_num_predicted_params * _num_predicted_frames,
+        weights_scaling=weights_scaling,
+        criterion=nn.L1Loss(reduction="none"),
+        global_head_dropout=cfg["model_params"]["global_head_dropout"],
+        disable_other_agents=cfg["model_params"]["disable_other_agents"],
+        disable_map=cfg["model_params"]["disable_map"],
+        disable_lane_boundaries=cfg["model_params"]["disable_lane_boundaries"],
+    )
+elif model_name == OFFLINE_RL_PLANNER:
+    model = VectorOfflineRLModel(
         history_num_frames_ego=cfg["model_params"]["history_num_frames_ego"],
         history_num_frames_agents=cfg["model_params"]["history_num_frames_agents"],
         num_targets=_num_predicted_params * _num_predicted_frames,
