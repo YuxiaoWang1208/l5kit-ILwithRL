@@ -15,6 +15,8 @@ from l5kit.planning.vectorized.closed_loop_model import VectorizedUnrollModel
 from l5kit.planning.vectorized.open_loop_model import VectorizedModel
 from l5kit.vectorization.vectorizer_builder import build_vectorizer
 
+from torch.utils.tensorboard import SummaryWriter
+
 import sys
 from pathlib import Path
 project_path = str(Path(__file__).parents[1])
@@ -23,7 +25,6 @@ sys.path.append(project_path)
 print(sys.path)
 
 from scripts.vectorized_offlin_rl_model import VectorOfflineRLModel
-
 
 # prepare data path and load cfg
 os.environ["L5KIT_DATA_FOLDER"] = "/mnt/share_disk/user/public/l5kit/prediction"
@@ -35,7 +36,7 @@ dm = LocalDataManager(None)
 from pathlib import Path
 print(Path.home())
 # Project path
-project_path = Path("/mnt/share_disk/user/daixingyuan/l5kit/")
+# project_path = Path("/mnt/share_disk/user/daixingyuan/l5kit/")
 
 dm = LocalDataManager(None)
 # get config
@@ -107,6 +108,10 @@ elif model_name == OFFLINE_RL_PLANNER:
 else:
     raise ValueError(f"{model_name=} is invalid")
 
+# tensorboard for log
+log_id = 1
+log_dir = Path(project_path, "logs")
+writer = SummaryWriter(log_dir=log_dir, comment=f"{model_name}-{log_id}")
 
 # prepare for training
 train_cfg = cfg["train_data_loader"]
@@ -124,7 +129,7 @@ losses_train = []
 model.train()
 torch.set_grad_enabled(True)
 
-for _ in progress_bar:
+for n_iter in progress_bar:
     try:
         data = next(tr_it)
     except StopIteration:
@@ -134,6 +139,11 @@ for _ in progress_bar:
     data = {k: v.to(device) for k, v in data.items()}
     result = model(data)
     loss = result["loss"]
+
+    writer.add_scalar('Loss/train', loss.item(), n_iter)
+    writer.add_scalar('Loss/train_policy_loss', result["loss_imitate"].item(), n_iter)
+    writer.add_scalar('Loss/train_prediction_loss', result["loss_other_agent_pred"].item(), n_iter)
+
     # Backward pass
     optimizer.zero_grad()
     loss.backward()
