@@ -86,3 +86,7 @@ for scene_idx in traffic_light_scene_id[:10]:
     out = zarr_to_visualizer_scene(zarr_dataset.get_scene_dataset(scene_idx), mapAPI)
     out_vis = visualize(scene_idx, out)
     show(out_vis)
+
+
+# todo EgoDataset scene 13 is a good choice for experiments.
+# 该场景包含了信号灯由红变绿的过程
