@@ -48,6 +48,10 @@ train_zarr = ChunkedDataset(dm.require(cfg["train_data_loader"]["key"])).open()
 
 vectorizer = build_vectorizer(cfg, dm)
 train_dataset = EgoDatasetVectorized(cfg, train_zarr, vectorizer)
+
+# todo demo for single scene
+traffic_signal_scene_id = 13
+train_dataset = train_dataset.get_scene_dataset(traffic_signal_scene_id)
 print(train_dataset)
 
 
@@ -109,9 +113,10 @@ else:
     raise ValueError(f"{model_name=} is invalid")
 
 # tensorboard for log
-log_id = 1
+# log_id = "7-debug"
+log_id = f"traffic_signal_scene_{traffic_signal_scene_id}-1"
 log_dir = Path(project_path, "logs")
-writer = SummaryWriter(log_dir=log_dir, comment=f"{model_name}-{log_id}")
+writer = SummaryWriter(log_dir=f"{log_dir}/{model_name}-{log_id}")
 
 # prepare for training
 train_cfg = cfg["train_data_loader"]

@@ -8,6 +8,8 @@ from torch import nn
 from l5kit.planning.vectorized.open_loop_model import VectorizedModel
 from l5kit.planning.vectorized.common import build_target_normalization, pad_avail, pad_points
 from l5kit.planning.vectorized.global_graph import MultiheadAttentionGlobalHead, VectorizedEmbedding
+from l5kit.planning.rasterized.model import RasterizedPlanningModel
+
 # from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
 
 from torch import nn
@@ -42,7 +44,7 @@ class VectorOfflineRLModel(VectorizedModel):
         :param disable_lane_boundaries: ignore lane boundaries
         """
 
-        num_targets = 3  # this will limit queries number to 1
+        # num_targets = 3  # this will limit queries number to 1
 
         super().__init__(
             history_num_frames_ego,
@@ -138,8 +140,10 @@ class VectorOfflineRLModel(VectorizedModel):
             # todo add other agents
             xy_other = data_batch["all_other_agents_future_positions"]  # ~ (12, 30, 12, 2)
             yaw_other = data_batch["all_other_agents_future_yaws"]  # ~ (12, 30, 12, 1)
-            if self.normalize_targets:
-                xy_other /= self.xy_scale
+
+            # todo normalize other agents target position
+            # if self.normalize_targets:
+            #     xy_other /= self.xy_scale
             all_other_agents_targets = torch.cat((xy_other, yaw_other), dim=-1)  # ~ (12, 30, 12, 3)
             all_other_agents_targets_weights = data_batch["all_other_agents_future_availability"].unsqueeze(-1)
 
@@ -147,7 +151,25 @@ class VectorOfflineRLModel(VectorizedModel):
             loss_other_agent_pred = torch.mean(
                 self.criterion(all_other_agent_prediction, all_other_agents_targets) * all_other_agents_targets_weights)
 
-            loss = loss_imitate + loss_other_agent_pred
+            # from l5kit.geometry.transform import transform_points
+            # transform_points(all_other_agents_targets[0], data_batch["agent_from_world"][0])
+
+            # for other agent
+            # data_batch["all_other_agents_history_positions"], data_batch['other_agents_polyline']
+            # data_batch['all_other_agents_future_positions']
+
+            # for ego
+            # data_batch['agent_trajectory_polyline']
+            # data_batch['target_positions']
+
+            # data_batch['agent_from_world']
+            # data_batch['agent_trajectory_polyline']
+            # data_batch['target_positions']
+
+            # all
+            # data_batch,data_batch["all_other_agents_history_positions"][0], data_batch['other_agents_polyline'][0],data_batch['all_other_agents_future_positions'][0],data_batch['target_positions'][0], data_batch['agent_trajectory_polyline'][0],data_batch['agent_from_world']
+
+            loss =  loss_other_agent_pred
 
             train_dict = {"loss": loss, "loss_imitate": loss_imitate, "loss_other_agent_pred": loss_other_agent_pred}
             return train_dict
