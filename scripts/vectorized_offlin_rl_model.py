@@ -30,6 +30,7 @@ class VectorOfflineRLModel(VectorizedModel):
             disable_other_agents: bool,
             disable_map: bool,
             disable_lane_boundaries: bool,
+            cfg: dict,
     ) -> None:
         """ Initializes the model.
 
@@ -58,6 +59,7 @@ class VectorOfflineRLModel(VectorizedModel):
             disable_lane_boundaries,
         )
 
+        self.cfg = cfg
         num_outputs = len(weights_scaling)
         num_timesteps = num_targets // num_outputs
 
@@ -169,7 +171,7 @@ class VectorOfflineRLModel(VectorizedModel):
             # all
             # data_batch,data_batch["all_other_agents_history_positions"][0], data_batch['other_agents_polyline'][0],data_batch['all_other_agents_future_positions'][0],data_batch['target_positions'][0], data_batch['agent_trajectory_polyline'][0],data_batch['agent_from_world']
 
-            loss =  loss_other_agent_pred
+            loss = self.cfg['imitate_loss_weight'] * loss_imitate + self.cfg['pred_loss_weight'] * loss_other_agent_pred
 
             train_dict = {"loss": loss, "loss_imitate": loss_imitate, "loss_other_agent_pred": loss_other_agent_pred}
             return train_dict

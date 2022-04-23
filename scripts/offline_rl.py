@@ -108,6 +108,7 @@ elif model_name == OFFLINE_RL_PLANNER:
         disable_other_agents=cfg["model_params"]["disable_other_agents"],
         disable_map=cfg["model_params"]["disable_map"],
         disable_lane_boundaries=cfg["model_params"]["disable_lane_boundaries"],
+        cfg=cfg
     )
 else:
     raise ValueError(f"{model_name=} is invalid")
@@ -163,3 +164,21 @@ for n_iter in progress_bar:
 # path_to_save = Path(project_path, "tmp", f"urban_driver_train_iter_{cfg['train_params']['max_num_steps']}.pt")
 # to_save.save(path_to_save)
 # print(f"MODEL STORED at {path_to_save}")
+
+
+if __name__ == '__main__':
+    import argparse
+
+    import argparse
+    import os
+    os.environ["_TEST_TUNE_TRIAL_UUID"] = "_"  # 在log路径不包含uuid, 这样可以是文件夹完全按照创建时间排序
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--imitate_loss_weight", type=float, default=1.0)
+    parser.add_argument("--pred_loss_weight", type=float, default=1.0)
+    parser.add_argument("--flag", type=str)
+
+    args = parser.parse_args()
+    imitate_loss_weight = args.imitate_loss_weight
+    pred_loss_weight = args.pred_loss_weight
+
