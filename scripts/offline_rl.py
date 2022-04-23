@@ -5,7 +5,7 @@ from pathlib import Path
 # from pycharm
 import numpy as np
 import torch
-from l5kit.configs import load_config_data
+# from l5kit.configs import load_config_data
 from l5kit.data import ChunkedDataset
 from l5kit.data import LocalDataManager
 from l5kit.dataset import EgoDatasetVectorized
@@ -113,7 +113,7 @@ def load_model(model_name):
     return model
 
 
-def init_logger(log_name):
+def init_logger(model_name, log_name):
     # tensorboard for log
     # log_id = "7-debug"
     log_id = (
@@ -122,14 +122,17 @@ def init_logger(log_name):
         f"-pred_weight_{log_name['pred_loss_weight']}"
         f"-1"
     )
+    model_log_id = f"{model_name}-{log_id}"
+
+
     log_dir = Path(project_path, "logs")
-    writer = SummaryWriter(log_dir=f"{log_dir}/{model_name}-{log_id}")
-    return writer
+    writer = SummaryWriter(log_dir=f"{log_dir}/{model_log_id}")
+    return writer, model_log_id
 
 
-def train(model, train_dataset, cfg, writer):
+def train(model, train_dataset, cfg, writer, model_name):
     # todo
-    cfg["train_params"]["max_num_steps"] = int(1e8)
+    # cfg["train_params"]["max_num_steps"] = int(1e8)
 
     train_cfg = cfg["train_data_loader"]
     train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
@@ -139,13 +142,13 @@ def train(model, train_dataset, cfg, writer):
     tr_it = iter(train_dataloader)
 
     # prepare for training
-    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
     model.train()
     torch.set_grad_enabled(True)
 
-    progress_bar = tqdm(range(cfg["train_params"]["max_num_steps"]))
+    progress_bar = tqdm(range(int(cfg["train_params"]["max_num_steps"])))
     for n_iter in progress_bar:
         try:
             data = next(tr_it)
@@ -169,15 +172,31 @@ def train(model, train_dataset, cfg, writer):
         losses_train.append(loss.item())
         progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
 
+        if n_iter % cfg["train_params"]["checkpoint_every_n_steps"] == 0:
+            # save model
+            # to_save = torch.jit.script(model.cpu())
+            dir_to_save = Path(project_path, "tmp", model_name)
+            dir_to_save.mkdir(parents=True, exist_ok=True)
+            path_to_save = Path(dir_to_save, f"iter_{n_iter:07}.pt")
+            # to_save.save(path_to_save)
+            # model.save(path_to_save)
+            torch.save(model.state_dict(), path_to_save)
+            print(f"MODEL STORED at {path_to_save}")
 
-# save model
-# to_save = torch.jit.script(model.cpu())
-# path_to_save = Path(project_path, "tmp", f"urban_driver_train_iter_{cfg['train_params']['max_num_steps']}.pt")
-# to_save.save(path_to_save)
-# print(f"MODEL STORED at {path_to_save}")
+import yaml
+def load_config_data(path: str) -> dict:
+    """Load a config data from a given path
+
+    :param path: the path as a string
+    :return: the config as a dict
+    """
+    with open(path) as f:
+        cfg: dict = yaml.safe_load(f)
+    return cfg
 
 
 if __name__ == '__main__':
+
     import argparse
 
     import argparse
@@ -188,9 +207,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--imitate_loss_weight", type=float, default=1.0)
     parser.add_argument("--pred_loss_weight", type=float, default=1.0)
+    parser.add_argument("--cuda_id", type=int, default=0)
     parser.add_argument("--flag", type=str)
 
     args = parser.parse_args()
+
+    gpu_avaliable_list = [str(args.cuda_id)]
+    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_avaliable_list)
+
     imitate_loss_weight = args.imitate_loss_weight
     pred_loss_weight = args.pred_loss_weight
 
@@ -208,6 +232,6 @@ if __name__ == '__main__':
         "imitate_loss_weight": imitate_loss_weight,
         "pred_loss_weight": pred_loss_weight,
     }
-    logger = init_logger(log_name)
+    logger, model_log_id = init_logger(model_name, log_name)
 
-    train(model, train_dataset, cfg, logger)
+    train(model, train_dataset, cfg, logger, model_name=model_log_id)
