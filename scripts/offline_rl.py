@@ -22,7 +22,7 @@ print("project path: ", project_path)
 sys.path.append(project_path)
 print(sys.path)
 
-from scripts.vectorized_offlin_rl_model import VectorOfflineRLModel
+from scripts.vectorized_offline_rl_model import VectorOfflineRLModel
 from pathlib import Path
 
 os.environ["L5KIT_DATA_FOLDER"] = "/mnt/share_disk/user/public/l5kit/prediction"
