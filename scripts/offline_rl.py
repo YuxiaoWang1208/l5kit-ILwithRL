@@ -2,10 +2,9 @@ import os
 import sys
 from pathlib import Path
 
-# from pycharm
 import numpy as np
 import torch
-# from l5kit.configs import load_config_data
+import yaml
 from l5kit.data import ChunkedDataset
 from l5kit.data import LocalDataManager
 from l5kit.dataset import EgoDatasetVectorized
@@ -26,14 +25,11 @@ print(sys.path)
 from scripts.vectorized_offlin_rl_model import VectorOfflineRLModel
 from pathlib import Path
 
-# prepare data path and load cfg
-
 os.environ["L5KIT_DATA_FOLDER"] = "/mnt/share_disk/user/public/l5kit/prediction"
 
-
-# print(Path.home())
-# Project path
-# project_path = Path("/mnt/share_disk/user/daixingyuan/l5kit/")
+URBAN_DRIVER = "Urban Driver"
+OPEN_LOOP_PLANNER = "Open Loop Planner"
+OFFLINE_RL_PLANNER = "Offline RL Planner"
 
 
 def load_dataset(cfg, traffic_signal_scene_id):
@@ -49,15 +45,6 @@ def load_dataset(cfg, traffic_signal_scene_id):
     train_dataset = train_dataset.get_scene_dataset(traffic_signal_scene_id)
     print(train_dataset)
     return train_dataset
-
-
-URBAN_DRIVER = "Urban Driver"
-OPEN_LOOP_PLANNER = "Open Loop Planner"
-OFFLINE_RL_PLANNER = "Offline RL Planner"
-
-
-# model_name = URBAN_DRIVER
-# model_name = OPEN_LOOP_PLANNER
 
 
 def load_model(model_name):
@@ -115,7 +102,6 @@ def load_model(model_name):
 
 def init_logger(model_name, log_name):
     # tensorboard for log
-    # log_id = "7-debug"
     log_id = (
         f"signal_scene_{log_name['traffic_signal_scene_id']}"
         f"-il_weight_{log_name['imitate_loss_weight']}"
@@ -123,7 +109,6 @@ def init_logger(model_name, log_name):
         f"-1"
     )
     model_log_id = f"{model_name}-{log_id}"
-
 
     log_dir = Path(project_path, "logs")
     writer = SummaryWriter(log_dir=f"{log_dir}/{model_log_id}")
@@ -183,7 +168,7 @@ def train(model, train_dataset, cfg, writer, model_name):
             torch.save(model.state_dict(), path_to_save)
             print(f"MODEL STORED at {path_to_save}")
 
-import yaml
+
 def load_config_data(path: str) -> dict:
     """Load a config data from a given path
 
@@ -196,9 +181,6 @@ def load_config_data(path: str) -> dict:
 
 
 if __name__ == '__main__':
-
-    import argparse
-
     import argparse
     import os
 
@@ -218,7 +200,7 @@ if __name__ == '__main__':
     imitate_loss_weight = args.imitate_loss_weight
     pred_loss_weight = args.pred_loss_weight
 
-    cfg = load_config_data(str(Path(project_path, "examples/urban_driver/config.yaml")))
+    cfg = load_config_data(str(Path(project_path, "scripts/offline_rl_config.yaml")))
     cfg.update(vars(args))
     print(cfg)
 
