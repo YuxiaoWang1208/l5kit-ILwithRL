@@ -10,6 +10,7 @@ from l5kit.planning.vectorized.common import build_target_normalization, pad_ava
 from l5kit.planning.vectorized.global_graph import MultiheadAttentionGlobalHead, VectorizedEmbedding
 from l5kit.planning.rasterized.model import RasterizedPlanningModel
 
+from l5kit.simulation.unroll import ClosedLoopSimulator
 # from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
 
 from torch import nn
@@ -180,7 +181,11 @@ class VectorOfflineRLModel(VectorizedModel):
             if self.normalize_targets:
                 pred_positions *= self.xy_scale
 
-            eval_dict = {"positions": pred_positions, "yaws": pred_yaws}
+            pred_positions_other_agents, pred_yaws_other_agents = all_other_agent_prediction[..., :2], all_other_agent_prediction[..., 2:3]
+
+            eval_dict = {"positions": pred_positions, "yaws": pred_yaws,
+                         "positions_other_agents": pred_positions_other_agents, "yaws_other_agents": pred_yaws_other_agents}
+
             if attns is not None:
                 eval_dict["attention_weights"] = attns
             return eval_dict
