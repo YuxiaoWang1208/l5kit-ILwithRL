@@ -217,4 +217,3 @@ if __name__ == '__main__':
     logger, model_log_id = init_logger(model_name, log_name)
 
     train(model, train_dataset, cfg, logger, model_name=model_log_id)
-    # tets
