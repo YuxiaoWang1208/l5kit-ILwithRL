@@ -52,7 +52,7 @@ print(train_dataset)
 URBAN_DRIVER = "Urban Driver"
 OPEN_LOOP_PLANNER = "Open Loop Planner"
 
-model_name = URBAN_DRIVER
+model_name = OPEN_LOOP_PLANNER
 
 weights_scaling = [1.0, 1.0, 1.0]
 
@@ -93,8 +93,8 @@ else:
 
 log_id = 1
 log_dir = Path(project_path, "logs")
-writer = SummaryWriter(log_dir=log_dir, comment=f"{model_name}-{log_id}")
-
+# writer = SummaryWriter(log_dir=log_dir, comment=f"{model_name}-{log_id}")
+writer = SummaryWriter(log_dir=f"{log_dir}/{model_name}-{log_id}")
 
 train_cfg = cfg["train_data_loader"]
 train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
