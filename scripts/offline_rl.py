@@ -32,7 +32,7 @@ OPEN_LOOP_PLANNER = "Open Loop Planner"
 OFFLINE_RL_PLANNER = "Offline RL Planner"
 
 
-def load_dataset(cfg, traffic_signal_scene_id):
+def load_dataset(cfg, traffic_signal_scene_id=None):
     dm = LocalDataManager(None)
     # ===== INIT DATASET
     # cfg["train_data_loader"]["key"] = "train.zarr"
@@ -42,7 +42,8 @@ def load_dataset(cfg, traffic_signal_scene_id):
     train_dataset = EgoDatasetVectorized(cfg, train_zarr, vectorizer)
 
     # todo demo for single scene
-    train_dataset = train_dataset.get_scene_dataset(traffic_signal_scene_id)
+    if traffic_signal_scene_id:
+        train_dataset = train_dataset.get_scene_dataset(traffic_signal_scene_id)
     print(train_dataset)
     return train_dataset
 
@@ -210,11 +211,10 @@ if __name__ == '__main__':
     model = load_model(model_name)
 
     log_name = {
-        "traffic_signal_scene_id": traffic_signal_scene_id,
+        "traffic_signal_scene_id": traffic_signal_scene_id if not None else "all",
         "imitate_loss_weight": imitate_loss_weight,
         "pred_loss_weight": pred_loss_weight,
     }
     logger, model_log_id = init_logger(model_name, log_name)
 
     train(model, train_dataset, cfg, logger, model_name=model_log_id)
-    # tets
