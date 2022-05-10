@@ -126,8 +126,6 @@ class VectorOfflineRLModel(VectorizedModel):
 
         # call the prediction model
 
-
-
         # calculate loss or return predicted position for inference
         if self.training:
             if self.criterion is None:
@@ -198,7 +196,7 @@ class VectorOfflineRLModel(VectorizedModel):
             static_avail: torch.Tensor,
             type_embedding: torch.Tensor,
             lane_bdry_len: int,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], torch.Tensor]:
         """ Encapsulates calling the global_head (TODO?) and preparing needed data.
 
         :param agents_polys: dynamic elements - i.e. vectors corresponding to agents
@@ -246,7 +244,6 @@ class VectorOfflineRLModel(VectorizedModel):
         outputs, attns = self.global_head(all_embs, type_embedding, invalid_polys)
 
         batch_size, future_frames, agent_feature = outputs.shape
-
 
         all_other_agent_prediction, attns_prediction = self.global_prediction_head(all_embs, type_embedding, invalid_polys)
         # all_other_agent_prediction ~ (12, 30, 1, 4)
