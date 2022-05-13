@@ -89,8 +89,8 @@ class VectorOfflineRLModel(VectorizedModel):
 
         # calculate rewards
         distance_to_center=reward.get_distance_to_centroid_per_frame(data_batch)
-        min_distance_to_other,_,_=reward.get_distance_to_other_agents_per_frame(data_batch)
-        target_reward=distance_to_center+min_distance_to_other
+        min_distance_to_other=reward.get_distance_to_other_agents_per_frame(data_batch)
+        target_reward=-(distance_to_center+min_distance_to_other)
 
         # ==== LANES ====
         # batch size x num lanes x num vectors x num features
@@ -161,7 +161,7 @@ class VectorOfflineRLModel(VectorizedModel):
             loss_imitate = torch.mean(self.criterion(outputs, targets) * target_weights)
             loss_other_agent_pred = torch.mean(
                 self.criterion(all_other_agent_prediction, all_other_agents_targets) * all_other_agents_targets_weights)
-            loss_reward=torch.mean(self.criterion(target_reward,reward_outputs))
+            loss_reward=torch.mean(self.criterion(target_reward.to('cuda:0'),reward_outputs))
 
             # from l5kit.geometry.transform import transform_points
             # transform_points(all_other_agents_targets[0], data_batch["agent_from_world"][0])
