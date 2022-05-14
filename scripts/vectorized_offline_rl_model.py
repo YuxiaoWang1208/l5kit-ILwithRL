@@ -90,7 +90,7 @@ class VectorOfflineRLModel(VectorizedModel):
         # calculate rewards
         distance_to_center=reward.get_distance_to_centroid_per_frame(data_batch)
         min_distance_to_other=reward.get_distance_to_other_agents_per_frame(data_batch)
-        target_reward=-(distance_to_center+min_distance_to_other)
+        target_reward=-distance_to_center+min_distance_to_other
 
         # ==== LANES ====
         # batch size x num lanes x num vectors x num features
