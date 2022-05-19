@@ -207,6 +207,8 @@ if __name__ == '__main__':
     cfg.update(vars(args))
     print(cfg)
 
+    # to test all traffic signal scenarios
+    # traffic_signal_scene_id = None
     traffic_signal_scene_id = 13
     train_dataset = load_dataset(cfg, traffic_signal_scene_id)
     model_name = OFFLINE_RL_PLANNER
