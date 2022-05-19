@@ -1,20 +1,20 @@
-from typing import Dict,  Optional
-from typing import List, Tuple
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
 
 import torch
 import torch.nn.functional as F
-from torch import nn
-
+from l5kit.planning.vectorized.common import pad_avail
+from l5kit.planning.vectorized.common import pad_points
+from l5kit.planning.vectorized.global_graph import MultiheadAttentionGlobalHead
 from l5kit.planning.vectorized.open_loop_model import VectorizedModel
-from l5kit.planning.vectorized.common import build_target_normalization, pad_avail, pad_points
-from l5kit.planning.vectorized.global_graph import MultiheadAttentionGlobalHead, VectorizedEmbedding
-from l5kit.planning.rasterized.model import RasterizedPlanningModel
-
-from l5kit.simulation.unroll import ClosedLoopSimulator
-# from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
-
 from torch import nn
+
 import reward
+
+
+# from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
 
 
 class VectorOfflineRLModel(VectorizedModel):
@@ -83,14 +83,13 @@ class VectorOfflineRLModel(VectorizedModel):
             self._d_global, 1, 1, dropout=self._global_head_dropout
         )
 
-
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # Load and prepare vectors for the model call, split into map and agents
 
         # calculate rewards
-        distance_to_center=reward.get_distance_to_centroid_per_frame(data_batch)
-        min_distance_to_other=reward.get_distance_to_other_agents_per_frame(data_batch)
-        target_reward=-distance_to_center+min_distance_to_other
+        distance_to_center = reward.get_distance_to_centroid_per_frame(data_batch)
+        min_distance_to_other = reward.get_distance_to_other_agents_per_frame(data_batch)
+        target_reward = -distance_to_center + min_distance_to_other
 
         # ==== LANES ====
         # batch size x num lanes x num vectors x num features
@@ -130,7 +129,7 @@ class VectorOfflineRLModel(VectorizedModel):
         lane_bdry_len = data_batch["lanes"].shape[1]
 
         # call the model with these features
-        outputs, attns, all_other_agent_prediction,reward_outputs = self.model_call(
+        outputs, attns, all_other_agent_prediction, reward_outputs = self.model_call(
             agents_polys, map_polys, agents_availabilities, map_availabilities, type_embedding, lane_bdry_len
         )
 
@@ -161,7 +160,7 @@ class VectorOfflineRLModel(VectorizedModel):
             loss_imitate = torch.mean(self.criterion(outputs, targets) * target_weights)
             loss_other_agent_pred = torch.mean(
                 self.criterion(all_other_agent_prediction, all_other_agents_targets) * all_other_agents_targets_weights)
-            loss_reward=torch.mean(self.criterion(target_reward.to('cuda:0'),reward_outputs))
+            loss_reward = torch.mean(self.criterion(target_reward.to('cuda:0'), reward_outputs))
 
             # from l5kit.geometry.transform import transform_points
             # transform_points(all_other_agents_targets[0], data_batch["agent_from_world"][0])
@@ -181,19 +180,23 @@ class VectorOfflineRLModel(VectorizedModel):
             # all
             # data_batch,data_batch["all_other_agents_history_positions"][0], data_batch['other_agents_polyline'][0],data_batch['all_other_agents_future_positions'][0],data_batch['target_positions'][0], data_batch['agent_trajectory_polyline'][0],data_batch['agent_from_world']
 
-            loss = self.cfg['imitate_loss_weight'] * loss_imitate + self.cfg['pred_loss_weight'] * loss_other_agent_pred+loss_reward
+            loss = self.cfg['imitate_loss_weight'] * loss_imitate + self.cfg[
+                'pred_loss_weight'] * loss_other_agent_pred + loss_reward
 
-            train_dict = {"loss": loss, "loss_imitate": loss_imitate, "loss_other_agent_pred": loss_other_agent_pred, "loss_reward": loss_reward}
+            train_dict = {"loss": loss, "loss_imitate": loss_imitate, "loss_other_agent_pred": loss_other_agent_pred,
+                          "loss_reward": loss_reward}
             return train_dict
         else:
             pred_positions, pred_yaws = outputs[..., :2], outputs[..., 2:3]
             if self.normalize_targets:
                 pred_positions *= self.xy_scale
 
-            pred_positions_other_agents, pred_yaws_other_agents = all_other_agent_prediction[..., :2], all_other_agent_prediction[..., 2:3]
+            pred_positions_other_agents, pred_yaws_other_agents = all_other_agent_prediction[...,
+                                                                  :2], all_other_agent_prediction[..., 2:3]
 
             eval_dict = {"positions": pred_positions, "yaws": pred_yaws,
-                         "positions_other_agents": pred_positions_other_agents, "yaws_other_agents": pred_yaws_other_agents}
+                         "positions_other_agents": pred_positions_other_agents,
+                         "yaws_other_agents": pred_yaws_other_agents}
 
             if attns is not None:
                 eval_dict["attention_weights"] = attns
@@ -256,12 +259,13 @@ class VectorOfflineRLModel(VectorizedModel):
 
         batch_size, future_frames, agent_feature = outputs.shape
 
-        all_other_agent_prediction, attns_prediction = self.global_prediction_head(all_embs, type_embedding, invalid_polys)
+        all_other_agent_prediction, attns_prediction = self.global_prediction_head(all_embs, type_embedding,
+                                                                                   invalid_polys)
         # all_other_agent_prediction ~ (12, 30, 1, 4)
         all_other_agent_prediction = all_other_agent_prediction.reshape(batch_size, future_frames, agent_feature, -1)
         # ~ (batch_size, num_all_other_agents, future_frames, agent_feature)
         all_other_agent_prediction = all_other_agent_prediction.permute(0, 3, 1, 2)
 
-        reward_outputs, reward_attns=self.reward_head(all_embs, type_embedding, invalid_polys)
+        reward_outputs, reward_attns = self.reward_head(all_embs, type_embedding, invalid_polys)
 
         return outputs, attns, all_other_agent_prediction, reward_outputs.view(-1)
