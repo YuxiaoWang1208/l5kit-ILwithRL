@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+
 project_path = str(Path(__file__).parents[1])
 print("project path: ", project_path)
 sys.path.append(project_path)
@@ -149,6 +150,7 @@ def train(model, train_dataset, cfg, writer, model_name):
         writer.add_scalar('Loss/train', loss.item(), n_iter)
         writer.add_scalar('Loss/train_policy_loss', result["loss_imitate"].item(), n_iter)
         writer.add_scalar('Loss/train_prediction_loss', result["loss_other_agent_pred"].item(), n_iter)
+        writer.add_scalar('Loss/train_reward_loss', result["loss_reward"].item(), n_iter)
 
         # Backward pass
         optimizer.zero_grad()
