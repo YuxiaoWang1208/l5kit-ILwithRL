@@ -24,7 +24,8 @@ model_params:
 train_data_loader:
   key: "scenes/train.zarr"
   batch_size: 12
-  shuffle: True
+  pred_len: 10   #prediction horizon
+  shuffle: False
   num_workers: 2
   ###################
   ## Only used for open-loop models
