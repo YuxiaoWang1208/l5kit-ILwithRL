@@ -83,13 +83,30 @@ class VectorOfflineRLModel(VectorizedModel):
             self._d_global, 1, 1, dropout=self._global_head_dropout
         )
 
+        self.value_head = MultiheadAttentionGlobalHead(
+            self._d_global, 1, 1, dropout=self._global_head_dropout
+        )
+
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # Load and prepare vectors for the model call, split into map and agents
 
         # calculate rewards
-        distance_to_center = reward.get_distance_to_centroid_per_frame(data_batch)
-        min_distance_to_other = reward.get_distance_to_other_agents_per_frame(data_batch)
+        distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
+        min_distance_to_other = reward.get_distance_to_other_agents_per_batch(data_batch)
         target_reward = -distance_to_center + min_distance_to_other
+
+        #calculate values
+        truncated_value_batch = []
+        pred_len = self.cfg["train_data_loader"]["pred_len"]
+        batch_size = self.cfg["train_data_loader"]["batch_size"]
+        for element_ix in range(batch_size):
+            truncated_value = sum(target_reward[element_ix + 1:element_ix + pred_len + 1])
+            truncated_value_batch.append(truncated_value)
+        truncated_value_batch = torch.stack(truncated_value_batch)
+
+        #reserve a batch_size data
+        data_batch = {k: v[:batch_size] for k, v in data_batch.items()}
+        target_reward = target_reward[:batch_size]
 
         # ==== LANES ====
         # batch size x num lanes x num vectors x num features
@@ -129,7 +146,7 @@ class VectorOfflineRLModel(VectorizedModel):
         lane_bdry_len = data_batch["lanes"].shape[1]
 
         # call the model with these features
-        outputs, attns, all_other_agent_prediction, reward_outputs = self.model_call(
+        outputs, attns, all_other_agent_prediction, reward_outputs, value_outputs = self.model_call(
             agents_polys, map_polys, agents_availabilities, map_availabilities, type_embedding, lane_bdry_len
         )
 
@@ -160,7 +177,8 @@ class VectorOfflineRLModel(VectorizedModel):
             loss_imitate = torch.mean(self.criterion(outputs, targets) * target_weights)
             loss_other_agent_pred = torch.mean(
                 self.criterion(all_other_agent_prediction, all_other_agents_targets) * all_other_agents_targets_weights)
-            loss_reward = torch.mean(self.criterion(target_reward.to('cuda:0'), reward_outputs))
+            loss_reward = torch.mean(self.criterion(target_reward, reward_outputs))
+            loss_value = torch.mean(self.criterion(truncated_value_batch, value_outputs))
 
             # from l5kit.geometry.transform import transform_points
             # transform_points(all_other_agents_targets[0], data_batch["agent_from_world"][0])
@@ -181,10 +199,10 @@ class VectorOfflineRLModel(VectorizedModel):
             # data_batch,data_batch["all_other_agents_history_positions"][0], data_batch['other_agents_polyline'][0],data_batch['all_other_agents_future_positions'][0],data_batch['target_positions'][0], data_batch['agent_trajectory_polyline'][0],data_batch['agent_from_world']
 
             loss = self.cfg['imitate_loss_weight'] * loss_imitate + self.cfg[
-                'pred_loss_weight'] * loss_other_agent_pred + loss_reward
+                'pred_loss_weight'] * loss_other_agent_pred + loss_reward + loss_value
 
             train_dict = {"loss": loss, "loss_imitate": loss_imitate, "loss_other_agent_pred": loss_other_agent_pred,
-                          "loss_reward": loss_reward}
+                          "loss_reward": loss_reward, "loss_value": loss_value}
             return train_dict
         else:
             pred_positions, pred_yaws = outputs[..., :2], outputs[..., 2:3]
@@ -268,4 +286,6 @@ class VectorOfflineRLModel(VectorizedModel):
 
         reward_outputs, reward_attns = self.reward_head(all_embs, type_embedding, invalid_polys)
 
-        return outputs, attns, all_other_agent_prediction, reward_outputs.view(-1)
+        value_outputs, _ = self.value_head(all_embs, type_embedding, invalid_polys)
+
+        return outputs, attns, all_other_agent_prediction, reward_outputs.view(-1), value_outputs.view(-1)

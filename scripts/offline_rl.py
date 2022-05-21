@@ -122,7 +122,7 @@ def train(model, train_dataset, cfg, writer, model_name):
     # cfg["train_params"]["max_num_steps"] = int(1e8)
 
     train_cfg = cfg["train_data_loader"]
-    train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
+    train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"] + train_cfg["pred_len"],
                                   num_workers=train_cfg["num_workers"])
     losses_train = []
     # training loops
@@ -144,6 +144,8 @@ def train(model, train_dataset, cfg, writer, model_name):
             data = next(tr_it)
         # Forward pass
         data = {k: v.to(device) for k, v in data.items()}
+        if len(data['extent']) < train_cfg["batch_size"] + train_cfg["pred_len"]:  #数据量不够
+            continue
         result = model(data)
         loss = result["loss"]
 
@@ -151,6 +153,7 @@ def train(model, train_dataset, cfg, writer, model_name):
         writer.add_scalar('Loss/train_policy_loss', result["loss_imitate"].item(), n_iter)
         writer.add_scalar('Loss/train_prediction_loss', result["loss_other_agent_pred"].item(), n_iter)
         writer.add_scalar('Loss/train_reward_loss', result["loss_reward"].item(), n_iter)
+        writer.add_scalar('Loss/train_value_loss', result["loss_value"].item(), n_iter)
 
         # Backward pass
         optimizer.zero_grad()

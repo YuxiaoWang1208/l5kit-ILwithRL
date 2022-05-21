@@ -124,7 +124,7 @@ def get_distance_to_centroid(
     return distance
 
 
-def get_distance_to_centroid_per_frame(_frame):
+def get_distance_to_centroid_per_batch(_frame):
     ego_centroid, _, _ = get_ego_current_state(_frame)
     ego_centroid = ego_centroid[:,:2]
 
@@ -183,7 +183,7 @@ def get_distance_to_other_agents(
     return distance
 
 
-def get_distance_to_other_agents_per_frame(_frame):
+def get_distance_to_other_agents_per_batch(_frame):
     distance_list = [[] for i in range(_frame[OTHER_AGENTS_EXTENTS].shape[0])]  #batch
     ego_centroid, ego_yaws, ego_extent = get_ego_current_state(_frame)
     # agent_ix = 25
