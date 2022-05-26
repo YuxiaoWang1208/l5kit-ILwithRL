@@ -88,6 +88,64 @@ class VectorOfflineRLModel(VectorizedModel):
         )
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        # ==== get additional info from the batch, or fall back to sensible defaults
+        future_num_frames = data_batch["target_availabilities"].shape[1]
+
+        # ==== Past  info ====
+        agents_past_polys = torch.cat(
+            [data_batch["agent_trajectory_polyline"].unsqueeze(1), data_batch["other_agents_polyline"]], dim=1
+        )
+        agents_past_avail = torch.cat(
+            [data_batch["agent_polyline_availability"].unsqueeze(1), data_batch["other_agents_polyline_availability"]],
+            dim=1,
+        )
+
+        # ==== Static (LANES) info ====
+        # batch size x num lanes x num vectors x num features
+        static_keys = ["lanes_mid", "crosswalks"]
+        if not self.disable_lane_boundaries:
+            static_keys += ["lanes"]
+        avail_keys = [f"{k}_availabilities" for k in static_keys]
+
+        max_num_vectors = max([data_batch[key].shape[-2] for key in static_keys])
+
+        static_polys = torch.cat([pad_points(data_batch[key], max_num_vectors) for key in static_keys], dim=1)
+        static_polys[..., -1].fill_(0)  # NOTE: this is a hack
+        # batch size x num lanes x num vectors
+        static_avail = torch.cat([pad_avail(data_batch[key], max_num_vectors) for key in avail_keys], dim=1)
+
+        # ==== Future info ====
+        agents_future_positions = torch.cat(
+            [data_batch["target_positions"].unsqueeze(1), data_batch["all_other_agents_future_positions"]], dim=1
+        )
+        agents_future_yaws = torch.cat(
+            [data_batch["target_yaws"].unsqueeze(1), data_batch["all_other_agents_future_yaws"]], dim=1
+        )
+        agents_future_avail = torch.cat(
+            [data_batch["target_availabilities"].unsqueeze(1), data_batch["all_other_agents_future_availability"]],
+            dim=1,
+        )
+
+        # concat XY and yaw to mimic past
+        agents_future_polys = torch.cat([agents_future_positions, agents_future_yaws], dim=3)
+
+        # Combine past and future agent information.
+        # Future information is ordered [T+1, T+2, ...], past information [T, T-1, T-2, ...].
+        # We thus flip past vectors and by concatenating get [..., T-2, T-1, T, T+1, T+2, ...].
+        # Now, at each step T the current time window of interest simply is represented by the indices
+        # T + agents_past_polys.shape[2] - window_size + 1: T + agents_past_polys.shape[2] + 1.
+        # During the training loop, we will fetch this information, as well as static features,
+        # which is all represented in the space of T = 0.
+        # We then transform this into the space of T and feed this to the model.
+        # Eventually, we shift our time window one step into the future.
+        # See below for more information about used coordinate spaces.
+        agents_polys = torch.cat([torch.flip(agents_past_polys, [2]), agents_future_polys], dim=2)
+        agents_avail = torch.cat([torch.flip(agents_past_avail.contiguous(), [2]), agents_future_avail], dim=2)
+        window_size = agents_past_polys.shape[2]
+        current_timestep = agents_past_polys.shape[2] - 1
+
+
+
         # Load and prepare vectors for the model call, split into map and agents
 
         # calculate rewards
@@ -108,19 +166,6 @@ class VectorOfflineRLModel(VectorizedModel):
         data_batch = {k: v[:batch_size] for k, v in data_batch.items()}
         target_reward = target_reward[:batch_size]
 
-        # ==== LANES ====
-        # batch size x num lanes x num vectors x num features
-        polyline_keys = ["lanes_mid", "crosswalks"]
-        if not self.disable_lane_boundaries:
-            polyline_keys += ["lanes"]
-        avail_keys = [f"{k}_availabilities" for k in polyline_keys]
-
-        max_num_vectors = max([data_batch[key].shape[-2] for key in polyline_keys])
-
-        map_polys = torch.cat([pad_points(data_batch[key], max_num_vectors) for key in polyline_keys], dim=1)
-        map_polys[..., -1].fill_(0)
-        # batch size x num lanes x num vectors
-        map_availabilities = torch.cat([pad_avail(data_batch[key], max_num_vectors) for key in avail_keys], dim=1)
 
         # ==== AGENTS ====
         # batch_size x (1 + M) x seq len x self._vector_length
@@ -147,7 +192,7 @@ class VectorOfflineRLModel(VectorizedModel):
 
         # call the model with these features
         outputs, attns, all_other_agent_prediction, reward_outputs, value_outputs = self.model_call(
-            agents_polys, map_polys, agents_availabilities, map_availabilities, type_embedding, lane_bdry_len
+            agents_polys, static_polys, agents_availabilities, static_avail, type_embedding, lane_bdry_len
         )
 
         # call the prediction model
