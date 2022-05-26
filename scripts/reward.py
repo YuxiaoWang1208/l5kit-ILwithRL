@@ -115,6 +115,10 @@ def get_distance_to_centroid(
     return distance
 
 
+def get_distance_to_centroid_by_element():
+    pass
+
+
 def get_distance_to_centroid_per_batch(_frame):
     ego_centroid, _, _ = get_ego_current_state(_frame)
     ego_centroid = ego_centroid[:, :2]
@@ -123,26 +127,30 @@ def get_distance_to_centroid_per_batch(_frame):
     # print("CENTROID")
     lanes_mid = _frame[LANES_MID]
     lanes_mid = lanes_mid[:, :, :, :2]  # only keep x, y batch 30 20 2
+    batch_size, num_lane_elements = lanes_mid.shape[0], lanes_mid.shape[1]
     history_centroid = get_ego_history_state(_frame)  # batch num_steps 2
     # print(history_centroid.device)
 
     # 筛选出距离历史四个位置距离之和最短的车道中线  即为行进路线的车道中线
     distance_to_mid_line = []
-    sum_distance_to_mid_line = torch.zeros((30, history_centroid.shape[0]), device=history_centroid.device)
-    for i in range(lanes_mid.shape[1]):
+    sum_distance_to_mid_line = torch.zeros(
+        (num_lane_elements, batch_size),
+        device=history_centroid.device
+    )
+    for lane_idx in range(num_lane_elements):
         distance_to_centroid = torch.zeros((history_centroid.shape[0], history_centroid.shape[1]),
                                            device=history_centroid.device)  # batch 4
-        mid_line = lanes_mid[:, i, :, :]
-        for j in range(history_centroid.shape[1]):
-            distance_to_centroid[:, j] = get_distance_to_centroid(history_centroid[:, j, :], mid_line)
+        mid_line = lanes_mid[:, lane_idx, :, :]
+        for step_idx in range(history_centroid.shape[1]):
+            distance_to_centroid[:, step_idx] = get_distance_to_centroid(history_centroid[:, step_idx, :], mid_line)
         distance_to_mid_line.append(distance_to_centroid)
-        sum_distance_to_mid_line[i, :] = torch.sum(distance_to_centroid, 1)
+        sum_distance_to_mid_line[lane_idx, :] = torch.sum(distance_to_centroid, 1)
 
     # sum_distance_to_mid_line=np.array(sum_distance_to_mid_line)
     distance = []
-    for i in range(lanes_mid.shape[0]):
-        line_index = sum_distance_to_mid_line[:, i].argmin()
-        distance.append(distance_to_mid_line[line_index][i, 0])
+    for batch_idx in range(lanes_mid.shape[0]):
+        line_index = sum_distance_to_mid_line[:, batch_idx].argmin()
+        distance.append(distance_to_mid_line[line_index][batch_idx, 0])
 
     return torch.tensor(distance, device=history_centroid.device)
 
