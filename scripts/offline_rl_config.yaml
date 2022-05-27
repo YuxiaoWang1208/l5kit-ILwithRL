@@ -23,18 +23,18 @@ model_params:
 ## Data loader options
 train_data_loader:
   key: "scenes/train.zarr"
-  batch_size: 12
+  batch_size: 16
   pred_len: 10   #prediction horizon
-  shuffle: False
+  shuffle: True
   num_workers: 2
   ###################
   ## Only used for open-loop models
   perturb_probability: 0.5
 
 val_data_loader:
-  key: "scenes/validate_0.zarr"
-  batch_size: 12
-  shuffle: False
+  key: "scenes/train.zarr"
+  batch_size: 16
+  shuffle: True
   num_workers: 2
 
 ###################
@@ -78,4 +78,4 @@ data_generation_params:
 train_params:
   checkpoint_every_n_steps: 5000
   max_num_steps:  1.0e+8 # 1e8
-  eval_every_n_steps: 10000
+  eval_every_n_steps: 10
