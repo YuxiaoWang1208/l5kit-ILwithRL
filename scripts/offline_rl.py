@@ -124,13 +124,18 @@ def init_logger(model_name, log_name):
     return writer, model_log_id
 
 
-def evaluation(model, eval_dataset, cfg, writer, model_name, eval_type):
+def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     model = model.eval()
     torch.set_grad_enabled(False)
 
     # todo to variable
+
+    # vectorizer = build_vectorizer(cfg, dm)
+    # eval_dataset = EgoDatasetVectorized(cfg, eval_zarr, vectorizer)
+    # print(eval_dataset)
+
     num_scenes_to_unroll = 1
     num_simulation_steps = 50
 
@@ -179,7 +184,7 @@ def evaluation(model, eval_dataset, cfg, writer, model_name, eval_type):
         agg = ValidationCountingAggregator().aggregate(validation_results)
         cle_evaluator.reset()
 
-    print(agg)
+        print(agg)
 
     # progress_bar = tqdm(range(int(cfg["train_params"]["max_num_steps"])))
     #
@@ -242,6 +247,9 @@ def train(model, train_dataset, cfg, writer, model_name):
 
         # first_step, agents_polys_horizon, trajectory_value = model.inference(data)
 
+        # model.eval()
+        # final_first_step = model.mpc(data)
+
         result_list = model(data)
         optimizer.zero_grad()
 
@@ -272,6 +280,10 @@ def train(model, train_dataset, cfg, writer, model_name):
             torch.save(model.state_dict(), path_to_save)
             print(f"MODEL STORED at {path_to_save}")
 
+        evaluation(model, eval_type="close_loop")
+
+
+
 
 def load_config_data(path: str) -> dict:
     """Load a config data from a given path
@@ -298,6 +310,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+
+    args.cuda_id = 1
+
     gpu_avaliable_list = [str(args.cuda_id)]
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_avaliable_list)
 
@@ -315,7 +330,7 @@ if __name__ == '__main__':
     eval_dataset = train_dataset
     model_name = OFFLINE_RL_PLANNER
 
-    num_ensemble = 5
+    num_ensemble = 4
 
     model_list = [load_model(model_name) for _ in range(num_ensemble)]
 
@@ -330,7 +345,15 @@ if __name__ == '__main__':
 
 
     model = EnsembleOfflineRLModel(model_list)
-    train(model, train_dataset, cfg, logger, model_name=model_log_id)
+    # train(model, train_dataset, cfg, logger, model_name=model_log_id)
+
+
+    # ===== INIT DATASET
+    eval_cfg = cfg["val_data_loader"]
+    dm = LocalDataManager(None)
+    eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
+
+    evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="closed_loop")
 
     # ===== INIT DATASET
     # dm = LocalDataManager(None)

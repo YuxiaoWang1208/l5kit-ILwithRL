@@ -36,7 +36,7 @@ class EnsembleOfflineRLModel(nn.Module):
             results = [model(data) for model in self.models]
             return results
         else:
-            self.mpc(data)
+            return self.mpc(data)
 
     def mpc(self, data):
 
@@ -57,7 +57,13 @@ class EnsembleOfflineRLModel(nn.Module):
         for i in range(batch_size):
             final_first_step[i] = first_step[index[i], i, :, :]
         # print(index, final_first_step)
-        return final_first_step
+
+        eval_dict = {
+            "positions": final_first_step[..., :2],
+            "yaws": final_first_step[..., 2:3],
+        }
+
+        return eval_dict
 
 
 
