@@ -1,7 +1,5 @@
 from typing import Dict
 from typing import List
-from typing import Optional
-from typing import Tuple
 
 import torch
 import torch.nn.functional as F
@@ -12,6 +10,8 @@ from l5kit.planning.vectorized.open_loop_model import VectorizedModel
 from torch import nn
 
 import reward
+from reward import AGENT_TRAJECTORY_POLYLINE, AGENT_YAWS, AGENT_EXTENT
+from reward import OTHER_AGENTS_POLYLINE, OTHER_AGENTS_YAWS, OTHER_AGENTS_EXTENTS
 
 
 # from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
@@ -90,6 +90,7 @@ class VectorOfflineRLModel(VectorizedModel):
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # ==== get additional info from the batch, or fall back to sensible defaults
         future_num_frames = data_batch["target_availabilities"].shape[1]
+        history_num_frames = data_batch["history_availabilities"].shape[1] - 1
 
         # ==== Past  info ====
         agents_past_polys = torch.cat(
@@ -98,6 +99,9 @@ class VectorOfflineRLModel(VectorizedModel):
         agents_past_avail = torch.cat(
             [data_batch["agent_polyline_availability"].unsqueeze(1), data_batch["other_agents_polyline_availability"]],
             dim=1,
+        )
+        agents_past_extent = torch.cat(
+            [data_batch["history_extents"].unsqueeze(1), data_batch["all_other_agents_history_extents"]], dim=1
         )
 
         # ==== Static (LANES) info ====
@@ -125,6 +129,9 @@ class VectorOfflineRLModel(VectorizedModel):
             [data_batch["target_availabilities"].unsqueeze(1), data_batch["all_other_agents_future_availability"]],
             dim=1,
         )
+        agents_future_extent = torch.cat(
+            [data_batch["target_extents"].unsqueeze(1), data_batch["all_other_agents_future_extents"]], dim=1
+        )
 
         # concat XY and yaw to mimic past
         agents_future_polys = torch.cat([agents_future_positions, agents_future_yaws], dim=3)
@@ -139,21 +146,57 @@ class VectorOfflineRLModel(VectorizedModel):
         # We then transform this into the space of T and feed this to the model.
         # Eventually, we shift our time window one step into the future.
         # See below for more information about used coordinate spaces.
+
+        # batch_size x (1 + num_agents) x (history_num_frames + 1 + future_num_frames) x dim
         agents_polys = torch.cat([torch.flip(agents_past_polys, [2]), agents_future_polys], dim=2)
         agents_avail = torch.cat([torch.flip(agents_past_avail.contiguous(), [2]), agents_future_avail], dim=2)
-        window_size = agents_past_polys.shape[2]
+        agents_extent = torch.cat([torch.flip(agents_past_extent, [2]), agents_future_extent], dim=2)
+
+
+        window_size = agents_past_polys.shape[2]  # (history_num_frames + 1)
         current_timestep = agents_past_polys.shape[2] - 1
-
-
+        num_frames_per_sample = agents_polys.shape[2]
 
         # Load and prepare vectors for the model call, split into map and agents
 
-        # calculate rewards
-        distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
-        min_distance_to_other = reward.get_distance_to_other_agents_per_batch(data_batch)
-        target_reward = -distance_to_center + min_distance_to_other
+        # calculate rewards ~ (batch_size x (history_frame + 1 + future_frame))
+        ego_polys = agents_polys[:, 0, :, :]
+        # batch_size x (1 + future_frame)  x window_size x dim
+        ego_polys_samples = ego_polys.unfold(1, window_size, 1).transpose(2, 3)
+        # todo add aval for lanes_mid
+        # flip() is used to transform [t-3, t-2, t-1, t] into [t, t-1, t-2, t-3]
+        ego_distance_to_centroid = torch.stack([reward.get_distance_to_centroid_by_element(
+            torch.flip(ego_polys_samples[:, idx, :, :2], [1]), data_batch["lanes_mid"][..., :2]) for idx in
+            range(ego_polys_samples.shape[1])
+        ])
+        # batch_size x future_frame (t, t+1, ..., t+future_frame)
+        ego_distance_to_centroid = ego_distance_to_centroid.transpose(1, 0)
+        ego_distance_to_centroid_future = ego_distance_to_centroid[:, 1:]
+        # distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
 
-        #calculate values
+        # min_distance_to_other = reward.get_distance_to_other_agents_per_batch(data_batch)
+
+        # ego: batch_size x (history_frame + 1 + future_frame) x dim
+        # agents: batch_size x num_agents x (history_frame + 1 + future_frame) x dim
+        batch_bind_history_future = {
+            AGENT_TRAJECTORY_POLYLINE: agents_polys[:, 0],
+            AGENT_YAWS: agents_polys[:, 0, :, 2:3],
+            AGENT_EXTENT: agents_extent[:, 0],
+            OTHER_AGENTS_POLYLINE: agents_polys[:, 1:, :, :],
+            OTHER_AGENTS_YAWS: agents_polys[:, 1:, :,  2:3],
+            OTHER_AGENTS_EXTENTS: agents_extent[:, 1:, :],
+            "all_other_agents_types": data_batch["all_other_agents_types"],
+        }
+        min_distance_to_other = torch.stack([
+            reward.get_distance_to_other_agents_per_batch(batch_bind_history_future, idx) for idx in range(
+                current_timestep+1, history_num_frames+1+future_num_frames)]
+        )
+        # batch x future_frame
+        min_distance_to_other = min_distance_to_other.transpose(1, 0)
+
+        target_reward = -ego_distance_to_centroid_future + min_distance_to_other
+
+        # calculate values
         truncated_value_batch = []
         pred_len = self.cfg["train_data_loader"]["pred_len"]
         batch_size = self.cfg["train_data_loader"]["batch_size"]
@@ -162,10 +205,9 @@ class VectorOfflineRLModel(VectorizedModel):
             truncated_value_batch.append(truncated_value)
         truncated_value_batch = torch.stack(truncated_value_batch)
 
-        #reserve a batch_size data
+        # reserve a batch_size data
         data_batch = {k: v[:batch_size] for k, v in data_batch.items()}
         target_reward = target_reward[:batch_size]
-
 
         # ==== AGENTS ====
         # batch_size x (1 + M) x seq len x self._vector_length
@@ -192,7 +234,12 @@ class VectorOfflineRLModel(VectorizedModel):
 
         # call the model with these features
         outputs, attns, all_other_agent_prediction, reward_outputs, value_outputs = self.model_call(
-            agents_polys, static_polys, agents_availabilities, static_avail, type_embedding, lane_bdry_len
+            agents_polys,
+            static_polys,
+            agents_availabilities,
+            static_avail,
+            type_embedding,
+            lane_bdry_len
         )
 
         # call the prediction model
@@ -273,7 +320,7 @@ class VectorOfflineRLModel(VectorizedModel):
             static_avail: torch.Tensor,
             type_embedding: torch.Tensor,
             lane_bdry_len: int,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], torch.Tensor]:
+    ):
         """ Encapsulates calling the global_head (TODO?) and preparing needed data.
 
         :param agents_polys: dynamic elements - i.e. vectors corresponding to agents

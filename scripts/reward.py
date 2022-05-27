@@ -85,6 +85,12 @@ def get_ego_current_state(_frame):
 
     return centroid, yaws, extent
 
+def get_ego_state_by_frame_idx(_batch, _frame_idx):
+    centroid = _batch[AGENT_TRAJECTORY_POLYLINE][:, _frame_idx, :]
+    yaws = _batch[AGENT_YAWS][:, _frame_idx, :]
+    extent = _batch[AGENT_EXTENT][:, _frame_idx, :]
+
+    return centroid, yaws, extent
 
 def get_ego_history_state(_frame):
     history_centroid = _frame[AGENT_TRAJECTORY_POLYLINE][:, :, :2]
@@ -101,6 +107,12 @@ def get_agent_current_state(_frame, agent_ix):
 
     return centroid, yaws, extent
 
+def get_agent_state_by_frame_idx(_batch, agent_ix, _frame_idx):
+    centroid = _batch[OTHER_AGENTS_POLYLINE][agent_ix[0], agent_ix[1]][_frame_idx]
+    yaws = _batch[OTHER_AGENTS_YAWS][agent_ix[0], agent_ix[1]][_frame_idx]
+    extent = _batch[OTHER_AGENTS_EXTENTS][agent_ix[0], agent_ix[1]][_frame_idx]
+
+    return centroid, yaws, extent
 
 #  Reward 1: distance to lane_mid
 # lane_mid reward
@@ -115,34 +127,29 @@ def get_distance_to_centroid(
     return distance
 
 
-def get_distance_to_centroid_by_element():
-    pass
+def get_distance_to_centroid_by_element(ego_current_history_centroid, lanes_mid):
+    # ego ~ batch, num_steps, 2
+    # lane_mid ~ batch, num_elements, num_points_per_elements, 2
+    assert ego_current_history_centroid.shape[0] == lanes_mid.shape[0]  # batch size
+    assert ego_current_history_centroid.shape[-1] == lanes_mid.shape[-1]  # point feature
 
-
-def get_distance_to_centroid_per_batch(_frame):
-    ego_centroid, _, _ = get_ego_current_state(_frame)
-    ego_centroid = ego_centroid[:, :2]
-
-    # 需要先筛选出ego行进路线的车道中线，而不是将所有车道中线都考虑
-    # print("CENTROID")
-    lanes_mid = _frame[LANES_MID]
-    lanes_mid = lanes_mid[:, :, :, :2]  # only keep x, y batch 30 20 2
     batch_size, num_lane_elements = lanes_mid.shape[0], lanes_mid.shape[1]
-    history_centroid = get_ego_history_state(_frame)  # batch num_steps 2
     # print(history_centroid.device)
 
     # 筛选出距离历史四个位置距离之和最短的车道中线  即为行进路线的车道中线
     distance_to_mid_line = []
     sum_distance_to_mid_line = torch.zeros(
         (num_lane_elements, batch_size),
-        device=history_centroid.device
+        device=ego_current_history_centroid.device
     )
     for lane_idx in range(num_lane_elements):
-        distance_to_centroid = torch.zeros((history_centroid.shape[0], history_centroid.shape[1]),
-                                           device=history_centroid.device)  # batch 4
+        distance_to_centroid = torch.zeros(
+            (ego_current_history_centroid.shape[0], ego_current_history_centroid.shape[1]),
+            device=ego_current_history_centroid.device)  # batch 4
         mid_line = lanes_mid[:, lane_idx, :, :]
-        for step_idx in range(history_centroid.shape[1]):
-            distance_to_centroid[:, step_idx] = get_distance_to_centroid(history_centroid[:, step_idx, :], mid_line)
+        for step_idx in range(ego_current_history_centroid.shape[1]):
+            distance_to_centroid[:, step_idx] = get_distance_to_centroid(ego_current_history_centroid[:, step_idx, :],
+                                                                         mid_line)
         distance_to_mid_line.append(distance_to_centroid)
         sum_distance_to_mid_line[lane_idx, :] = torch.sum(distance_to_centroid, 1)
 
@@ -152,10 +159,30 @@ def get_distance_to_centroid_per_batch(_frame):
         line_index = sum_distance_to_mid_line[:, batch_idx].argmin()
         distance.append(distance_to_mid_line[line_index][batch_idx, 0])
 
-    return torch.tensor(distance, device=history_centroid.device)
+    return torch.tensor(distance, device=ego_current_history_centroid.device)
+
+
+# def get_distance_to_centroid_multistep(agents_polys, lanes_mid):
+
+
+
+
+def get_distance_to_centroid_per_batch(_frame):
+    # todo error here. the returned reward is for last step!
+    # ego_centroid, _, _ = get_ego_current_state(_frame)
+    # ego_centroid = ego_centroid[:, :2]
+
+    # 需要先筛选出ego行进路线的车道中线，而不是将所有车道中线都考虑
+    # print("CENTROID")
+    lanes_mid = _frame[LANES_MID]
+    lanes_mid = lanes_mid[:, :, :, :2]  # only keep x, y batch 30 20 2
+    history_centroid = get_ego_history_state(_frame)  # batch num_steps 2
+
+    distance = get_distance_to_centroid_by_element(history_centroid, lanes_mid)
 
     # lanes_mid = lanes_mid.reshape(-1,600, 2)
     # distance = get_distance_to_centroid(ego_centroid, lanes_mid)
+    return distance
 
 
 # get_distance_to_centroid_per_frame(tr_sample)
@@ -179,13 +206,15 @@ def get_distance_to_other_agents(
     return distance
 
 
-def get_distance_to_other_agents_per_batch(_frame):
-    distance_list = [[] for i in range(_frame[OTHER_AGENTS_EXTENTS].shape[0])]  # batch
-    ego_centroid, ego_yaws, ego_extent = get_ego_current_state(_frame)
+# def get_distance_to_other_agents_per_frame(ego_frame, agent_frame):
+
+def get_distance_to_other_agents_per_batch(_batch, _frame_idx):
+    distance_list = [[] for i in range(_batch[OTHER_AGENTS_EXTENTS].shape[0])]  # batch
+    ego_centroid, ego_yaws, ego_extent = get_ego_state_by_frame_idx(_batch, _frame_idx)
     # agent_ix = 25
 
-    agents_type = _frame["all_other_agents_types"]
-    agents_extent = torch.mean(_frame[OTHER_AGENTS_EXTENTS][:, :, 0, :], axis=2)
+    agents_type = _batch["all_other_agents_types"]
+    agents_extent = torch.mean(_batch[OTHER_AGENTS_EXTENTS][:, :, 0, :], axis=2)
     # print("agent_extent")
     # print(agents_extent)
 
@@ -195,12 +224,13 @@ def get_distance_to_other_agents_per_batch(_frame):
     # print(agent_ix_avail)
 
     for agent_ix in agent_ix_avail:
-        agent_info = get_agent_current_state(_frame, agent_ix)
+        # agent_info = get_agent_state_by_frame_idx(_batch, agent_ix)
+        agent_info = get_agent_state_by_frame_idx(_batch, agent_ix, _frame_idx)
         dist = get_distance_to_other_agents(ego_centroid[agent_ix[0]], ego_yaws[agent_ix[0]], ego_extent[agent_ix[0]],
                                             *agent_info)
         distance_list[agent_ix[0]].append(dist)
 
-    distance = torch.zeros(len(distance_list), device=_frame[OTHER_AGENTS_EXTENTS].device)
+    distance = torch.zeros(len(distance_list), device=_batch[OTHER_AGENTS_EXTENTS].device)
     for i in range(len(distance)):
         distance[i] = np.min(distance_list[i])
 
