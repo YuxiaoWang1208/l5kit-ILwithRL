@@ -52,6 +52,8 @@ OTHER_AGENTS_EXTENTS = "all_other_agents_history_extents"
 LANES_MID = "lanes_mid"
 LANES_MID_AVAIL = "lanes_mid_availabilities"
 
+SAFE_DISTANCE_BETWEEN_EGO_AGENTS = 50  # todo
+
 
 def load_dataset(cfg, traffic_signal_scene_id=None):
     dm = LocalDataManager(None)
@@ -209,7 +211,8 @@ def get_distance_to_other_agents(
 # def get_distance_to_other_agents_per_frame(ego_frame, agent_frame):
 
 def get_distance_to_other_agents_per_batch(_batch, _frame_idx):
-    distance_list = [[] for i in range(_batch[OTHER_AGENTS_EXTENTS].shape[0])]  # batch
+    batch_size = _batch[OTHER_AGENTS_EXTENTS].shape[0]
+    distance_list = [[] for i in range(batch_size)]  # batch
     ego_centroid, ego_yaws, ego_extent = get_ego_state_by_frame_idx(_batch, _frame_idx)
     # agent_ix = 25
 
@@ -231,8 +234,13 @@ def get_distance_to_other_agents_per_batch(_batch, _frame_idx):
         distance_list[agent_ix[0]].append(dist)
 
     distance = torch.zeros(len(distance_list), device=_batch[OTHER_AGENTS_EXTENTS].device)
-    for i in range(len(distance)):
-        distance[i] = np.min(distance_list[i])
+
+    for idx_in_batch in range(len(distance)):
+        if distance_list[idx_in_batch]:
+            distance[idx_in_batch] = np.min(distance_list[idx_in_batch])
+        else:
+            # there is no other agent for the frame
+            distance[idx_in_batch] = SAFE_DISTANCE_BETWEEN_EGO_AGENTS
 
     return distance
 

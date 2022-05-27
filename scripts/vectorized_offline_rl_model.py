@@ -211,23 +211,11 @@ class VectorOfflineRLModel(VectorizedModel):
         # truncated_value_batch = torch.stack(truncated_value_batch)
 
         # ==== AGENTS ====
-        # batch_size x (1 + M) x seq len x self._vector_length
-        agents_polys = torch.cat(
-            [data_batch["agent_trajectory_polyline"].unsqueeze(1), data_batch["other_agents_polyline"]], dim=1
-        )
         # batch_size x (1 + M) x num vectors x self._vector_length
-        agents_polys = pad_points(agents_polys, max_num_vectors)
+        agents_polys = pad_points(agents_past_polys, max_num_vectors)
 
-        # batch_size x (1 + M) x seq len
-        agents_availabilities = torch.cat(
-            [
-                data_batch["agent_polyline_availability"].unsqueeze(1),
-                data_batch["other_agents_polyline_availability"],
-            ],
-            dim=1,
-        )
         # batch_size x (1 + M) x num vectors
-        agents_availabilities = pad_avail(agents_availabilities, max_num_vectors)
+        agents_availabilities = pad_avail(agents_past_avail, max_num_vectors)
 
         # batch_size x (1 + M) x num features
         type_embedding = self.type_embedding(data_batch).transpose(0, 1)
