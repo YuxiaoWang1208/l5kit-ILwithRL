@@ -1,6 +1,6 @@
 from typing import Dict
-from typing import Dict, List, Tuple
 from typing import List
+from typing import Tuple
 
 import torch
 import torch.nn.functional as F
@@ -115,7 +115,6 @@ class VectorOfflineRLModel(VectorizedModel):
         batch_size = self.cfg["train_data_loader"]["batch_size"]
         device = data_batch["history_availabilities"].device
 
-
         # ==== LANES ====
         # batch size x num lanes x num vectors x num features
         polyline_keys = ["lanes_mid", "crosswalks"]
@@ -154,7 +153,7 @@ class VectorOfflineRLModel(VectorizedModel):
         # avail_point_dim = agents_past_avail.shape[-1]
         num_agents = agents_past_avail.shape[1]
         agents_polys_horizon = torch.zeros((batch_size, num_agents, history_num_frames + 1 + trajectory_len,
-                                           trajectory_point_dim),
+                                            trajectory_point_dim),
                                            device=device)
         agents_avail_horizon = torch.ones((batch_size, num_agents, history_num_frames + 1 + trajectory_len),
                                           device=device)
@@ -226,21 +225,45 @@ class VectorOfflineRLModel(VectorizedModel):
             )  # outputs: 12,12,3  ,  all_other_agent_prediction: 12,30,12,3 , reward_outputs: 12  , value_outputs: 12
 
             # outputs are in ts space (optionally xy normalised)
+            # only the first step
             pred_xy_step = outputs[:, 0, :2]
             pred_yaw_step = outputs[:, 0, 2:3] if not self.limit_predicted_yaw else 0.3 * torch.tanh(outputs[:, 0, 2:3])
 
+            # only select the first step
+            pred_other_agents_xy_step = all_other_agent_prediction[:, :, 0, :2]
+            pred_other_agents_yaw_step = all_other_agent_prediction[:, :, 0,
+                                         2:3] if not self.limit_predicted_yaw else 0.3 * torch.tanh(outputs[:, 1:, 2:3])
+
             # todo normalise
             pred_xy_step_unnorm = pred_xy_step
+            pred_other_agents_xy_step_unnorm = pred_other_agents_xy_step
             if self.normalize_targets:
+                raise NotImplementedError
                 pred_xy_step_unnorm = pred_xy_step * self.xy_scale[0]
+                pred_other_agents_xy_step = None
 
             # ==== SAVE PREDICTIONS & GT
-            pred_xy_step_t0 = pred_xy_step_unnorm[:, None, :] \
-                              @ t0_from_ts[..., :2, :2].transpose(1, 2) \
-                              + t0_from_ts[..., :2, -1:].transpose(1, 2)
+
+            def get_point(xy, coord_transform):
+                xy_new = xy[:, None, :] \
+                         @ coord_transform[..., :2, :2].transpose(1, 2) \
+                         + coord_transform[..., :2, -1:].transpose(1, 2)
+                return xy_new
+
+            # pred_xy_step_t0 = pred_xy_step_unnorm[:, None, :] \
+            #                   @ t0_from_ts[..., :2, :2].transpose(1, 2) \
+            #                   + t0_from_ts[..., :2, -1:].transpose(1, 2)
+            pred_xy_step_t0 = get_point(pred_xy_step_unnorm, t0_from_ts)
             pred_xy_step_t0 = pred_xy_step_t0[:, 0]
             pred_yaw_step_t0 = pred_yaw_step + yaw_t0_from_ts
 
+            pred_other_agents_xy_step_t0 = torch.zeros_like(pred_other_agents_xy_step_unnorm)
+            for agents_idx in range(pred_other_agents_xy_step_unnorm.shape[1]):
+                agents_xy = pred_other_agents_xy_step_unnorm[:, agents_idx]
+                agents_xy_t0 = get_point(agents_xy, t0_from_ts)
+                pred_other_agents_xy_step_t0[:, agents_idx] = agents_xy_t0[:, 0]
+
+            pred_other_agnets_yaw_step_t0 = pred_other_agents_yaw_step + yaw_t0_from_ts.unsqueeze(1)
 
             # ==== UPDATE HISTORY WITH INFORMATION FROM PREDICTION
 
@@ -250,8 +273,9 @@ class VectorOfflineRLModel(VectorizedModel):
             )
 
             # update AoI
-            agents_polys_horizon[:, 0, current_timestep+1, :2] = pred_xy_step_t0
-            agents_polys_horizon[:, 0, current_timestep+1, 2:3] = pred_yaw_step_t0
+            agents_polys_horizon[:, 0, current_timestep + 1, :2] = pred_xy_step_t0
+            agents_polys_horizon[:, 0, current_timestep + 1, 2:3] = pred_yaw_step_t0
+            agents_polys_horizon[:, 1:, current_timestep + 1, :2] = agents_polys_horizon[:, 1:, current_timestep, :2]
             # agents_availabilities[:, 0]
 
             # move time window one step into the future
@@ -291,7 +315,8 @@ class VectorOfflineRLModel(VectorizedModel):
 
             if idx == trajectory_len - 1:
                 trajectory_value += value_outputs
-        return first_step, trajectory_value
+
+        return first_step, agents_polys_horizon, trajectory_value
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # ==== get additional info from the batch, or fall back to sensible defaults
@@ -602,7 +627,7 @@ class VectorOfflineRLModel(VectorizedModel):
                 zero,
                 zero,
                 one,
-                ],
+            ],
             dim=1,
         ).view(-1, 3, 3)
         # this is only required to keep t0_from_ts updated
