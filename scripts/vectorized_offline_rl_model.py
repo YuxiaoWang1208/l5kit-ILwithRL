@@ -159,6 +159,7 @@ class VectorOfflineRLModel(VectorizedModel):
 
         # Load and prepare vectors for the model call, split into map and agents
 
+        # === compute reward ===
         # calculate rewards ~ (batch_size x (history_frame + 1 + future_frame))
         ego_polys = agents_polys[:, 0, :, :]
         # batch_size x (1 + future_frame)  x window_size x dim
@@ -194,20 +195,20 @@ class VectorOfflineRLModel(VectorizedModel):
         # batch x future_frame
         min_distance_to_other = min_distance_to_other.transpose(1, 0)
 
-        target_reward = -ego_distance_to_centroid_future + min_distance_to_other
+        target_reward_all = -ego_distance_to_centroid_future + min_distance_to_other
+        target_reward = target_reward_all[:, 0].clone()  # one-step reward
 
-        # calculate values
-        truncated_value_batch = []
+        # === compute values ===
         pred_len = self.cfg["train_data_loader"]["pred_len"]
-        batch_size = self.cfg["train_data_loader"]["batch_size"]
-        for element_ix in range(batch_size):
-            truncated_value = sum(target_reward[element_ix + 1:element_ix + pred_len + 1])
-            truncated_value_batch.append(truncated_value)
-        truncated_value_batch = torch.stack(truncated_value_batch)
+        # batch_size = self.cfg["train_data_loader"]["batch_size"]
 
-        # reserve a batch_size data
-        data_batch = {k: v[:batch_size] for k, v in data_batch.items()}
-        target_reward = target_reward[:batch_size]
+        assert pred_len <= future_num_frames
+        truncated_value = target_reward_all[:, :pred_len].sum(axis=1)
+
+        # for element_ix in range(batch_size):
+        #     truncated_value = sum(target_reward[element_ix + 1:element_ix + pred_len + 1])
+        #     truncated_value_batch.append(truncated_value)
+        # truncated_value_batch = torch.stack(truncated_value_batch)
 
         # ==== AGENTS ====
         # batch_size x (1 + M) x seq len x self._vector_length
@@ -270,7 +271,7 @@ class VectorOfflineRLModel(VectorizedModel):
             loss_other_agent_pred = torch.mean(
                 self.criterion(all_other_agent_prediction, all_other_agents_targets) * all_other_agents_targets_weights)
             loss_reward = torch.mean(self.criterion(target_reward, reward_outputs))
-            loss_value = torch.mean(self.criterion(truncated_value_batch, value_outputs))
+            loss_value = torch.mean(self.criterion(truncated_value, value_outputs))
 
             # from l5kit.geometry.transform import transform_points
             # transform_points(all_other_agents_targets[0], data_batch["agent_from_world"][0])
