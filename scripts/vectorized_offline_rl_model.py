@@ -188,7 +188,7 @@ class VectorOfflineRLModel(VectorizedModel):
         yaw_t0_from_ts = zero
         yaw_ts_from_t0 = zero
 
-        trajectory_value = torch.zeros(batch_size)
+        trajectory_value = torch.zeros(batch_size, device=one.device)
 
         for idx in range(trajectory_len):
             # ==== AGENTS ====
@@ -270,11 +270,24 @@ class VectorOfflineRLModel(VectorizedModel):
             if idx == 0:
                 first_step = outputs[:, :1, :]  # 轨迹中的第一步
 
+            # ==== UPDATE REWARD
+            # batch_bind_ = {
+            #     AGENT_TRAJECTORY_POLYLINE: agents_polys[:, 0],
+            #     AGENT_YAWS: agents_polys[:, 0, :, 2:3],
+            #     AGENT_EXTENT: agents_extent[:, 0],
+            #     OTHER_AGENTS_POLYLINE: agents_polys[:, 1:, :, :],
+            #     OTHER_AGENTS_YAWS: agents_polys[:, 1:, :, 2:3],
+            #     OTHER_AGENTS_EXTENTS: agents_extent[:, 1:, :],
+            #     "all_other_agents_types": data_batch["all_other_agents_types"],
+            # }
+
             # calculate rewards
-            distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
-            min_distance_to_other = reward.get_distance_to_other_agents_per_batch(data_batch)
-            target_reward = -distance_to_center + min_distance_to_other
-            trajectory_value += target_reward
+            # distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
+            # min_distance_to_other = reward.get_distance_to_other_agents_per_batch(
+            #     data_batch, )
+            # target_reward = -distance_to_center + min_distance_to_other
+            # target_reward = reward_outputs
+            trajectory_value += reward_outputs
 
             if idx == trajectory_len - 1:
                 trajectory_value += value_outputs
