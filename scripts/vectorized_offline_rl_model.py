@@ -36,12 +36,28 @@ class EnsembleOfflineRLModel(nn.Module):
             results = [model(data) for model in self.models]
             return results
         else:
-            pass
+            self.mpc(data)
 
+    def mpc(self, data):
 
+        first_step_list = []
+        trajectory_value_list = []
+        for model in self.models:
+            first_step, _, trajectory_value = model.inference(data)
+            first_step_list.append(first_step)
+            trajectory_value_list.append(trajectory_value)
 
+        first_step = torch.stack(first_step_list, dim=0)
+        trajectory_value = torch.stack(trajectory_value_list, dim=0)
 
+        index = torch.argmax(trajectory_value, dim=0)
+        final_first_step = torch.zeros_like(first_step_list[0])
 
+        batch_size = len(index)
+        for i in range(batch_size):
+            final_first_step[i] = first_step[index[i], i, :, :]
+        # print(index, final_first_step)
+        return final_first_step
 
 
 
