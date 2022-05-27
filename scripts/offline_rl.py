@@ -17,6 +17,13 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
+from l5kit.cle.closed_loop_evaluator import ClosedLoopEvaluator, EvaluationPlan
+from l5kit.cle.metrics import (CollisionFrontMetric, CollisionRearMetric, CollisionSideMetric,
+                               DisplacementErrorL2Metric, DistanceToRefTrajectoryMetric)
+from l5kit.cle.validators import RangeValidator, ValidationCountingAggregator
+
+from l5kit.simulation.dataset import SimulationConfig
+from l5kit.simulation.unroll import ClosedLoopSimulator
 
 project_path = str(Path(__file__).parents[1])
 print("project path: ", project_path)
@@ -117,6 +124,92 @@ def init_logger(model_name, log_name):
     return writer, model_log_id
 
 
+def evaluation(model, eval_dataset, cfg, writer, model_name, eval_type):
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    model = model.eval()
+    torch.set_grad_enabled(False)
+
+    # todo to variable
+    num_scenes_to_unroll = 1
+    num_simulation_steps = 50
+
+    # for model in model_list:
+    #     # prepare for training
+    #     model = model.to(device)
+    #     model.eval()
+    # model.load_state_dict(torch.load(Path(project_path, "tmp", model_name, "iter_0010000.pt")))
+
+    if eval_type == "closed_loop":
+        # ==== DEFINE CLOSED-LOOP SIMULATION
+        sim_cfg = SimulationConfig(use_ego_gt=False, use_agents_gt=True, disable_new_agents=True,
+                                   distance_th_far=500, distance_th_close=50, num_simulation_steps=num_simulation_steps,
+                                   start_frame_index=0, show_info=True)
+
+        sim_loop = ClosedLoopSimulator(sim_cfg, eval_dataset, device, model_ego=model, model_agents=None)
+
+        # ==== UNROLL
+        scenes_to_unroll = list(range(0, len(eval_zarr.scenes), len(eval_zarr.scenes) // num_scenes_to_unroll))
+        sim_outs = sim_loop.unroll(scenes_to_unroll)
+
+        metrics = [DisplacementErrorL2Metric(),
+                   DistanceToRefTrajectoryMetric(),
+                   CollisionFrontMetric(),
+                   CollisionRearMetric(),
+                   CollisionSideMetric()]
+
+        validators = [RangeValidator("displacement_error_l2", DisplacementErrorL2Metric, max_value=30),
+                      RangeValidator("distance_ref_trajectory", DistanceToRefTrajectoryMetric, max_value=4),
+                      RangeValidator("collision_front", CollisionFrontMetric, max_value=0),
+                      RangeValidator("collision_rear", CollisionRearMetric, max_value=0),
+                      RangeValidator("collision_side", CollisionSideMetric, max_value=0)]
+
+        intervention_validators = ["displacement_error_l2",
+                                   "distance_ref_trajectory",
+                                   "collision_front",
+                                   "collision_rear",
+                                   "collision_side"]
+
+        cle_evaluator = ClosedLoopEvaluator(EvaluationPlan(metrics=metrics,
+                                                           validators=validators,
+                                                           composite_metrics=[],
+                                                           intervention_validators=intervention_validators))
+        cle_evaluator.evaluate(sim_outs)
+        validation_results = cle_evaluator.validation_results()
+        agg = ValidationCountingAggregator().aggregate(validation_results)
+        cle_evaluator.reset()
+
+    print(agg)
+
+    # progress_bar = tqdm(range(int(cfg["train_params"]["max_num_steps"])))
+    #
+    # for n_iter in progress_bar:
+    #     try:
+    #         data = next(tr_it)
+    #     except StopIteration:
+    #         tr_it = iter(train_dataloader)
+    #         data = next(tr_it)
+    #     # Forward pass
+    #     data = {k: v.to(device) for k, v in data.items()}
+    #
+    #     first_step_list = []
+    #     trajectory_value_list = []
+    #     for model in model_list:
+    #         first_step, trajectory_value = model.mpc(data)  # 得到第一条轨迹的第一个d
+    #         first_step_list.append(first_step)
+    #         trajectory_value_list.append(trajectory_value)
+    #
+    #     first_step = torch.stack(first_step_list, dim=0)
+    #     trajectory_value = torch.stack(trajectory_value_list, dim=0)
+    #     index = torch.argmax(trajectory_value, dim=0)
+    #     final_first_step = torch.zeros_like(first_step)
+    #
+    #     for i in range(len(index)):
+    #         final_first_step[i] = first_step[index[i], i, :, :]
+    #
+    #     print(index, final_first_step)
+
+
 def train(model, train_dataset, cfg, writer, model_name):
     # todo
     # cfg["train_params"]["max_num_steps"] = int(1e8)
@@ -214,8 +307,12 @@ if __name__ == '__main__':
     # traffic_signal_scene_id = None
     traffic_signal_scene_id = 13
     train_dataset = load_dataset(cfg, traffic_signal_scene_id)
+    eval_dataset = train_dataset
     model_name = OFFLINE_RL_PLANNER
-    model = load_model(model_name)
+
+    num_ensemble = 5
+
+    model_list = [load_model(model_name) for _ in range(num_ensemble)]
 
     log_name = {
         "traffic_signal_scene_id": traffic_signal_scene_id if not None else "all",
@@ -224,4 +321,13 @@ if __name__ == '__main__':
     }
     logger, model_log_id = init_logger(model_name, log_name)
 
-    train(model, train_dataset, cfg, logger, model_name=model_log_id)
+    # train(model, train_dataset, cfg, logger, model_name=model_log_id)
+
+
+    # ===== INIT DATASET
+    dm = LocalDataManager(None)
+    eval_cfg = cfg["val_data_loader"]
+    eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
+    vectorizer = build_vectorizer(cfg, dm)
+    eval_dataset = EgoDatasetVectorized(cfg, eval_zarr, vectorizer)
+    evaluation(model_list, eval_dataset, cfg, logger, model_name=model_log_id)
