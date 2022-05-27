@@ -1,19 +1,25 @@
 from typing import Dict
+from typing import Dict, List, Tuple
 from typing import List
 
 import torch
 import torch.nn.functional as F
+# from l5kit.planning.vectorized.common import
 from l5kit.planning.vectorized.common import pad_avail
 from l5kit.planning.vectorized.common import pad_points
+from l5kit.planning.vectorized.common import transform_points
 from l5kit.planning.vectorized.global_graph import MultiheadAttentionGlobalHead
 from l5kit.planning.vectorized.open_loop_model import VectorizedModel
 from torch import nn
 
 import reward
-from reward import AGENT_TRAJECTORY_POLYLINE, AGENT_YAWS, AGENT_EXTENT
-from reward import OTHER_AGENTS_POLYLINE, OTHER_AGENTS_YAWS, OTHER_AGENTS_EXTENTS
+from reward import AGENT_EXTENT
+from reward import AGENT_TRAJECTORY_POLYLINE
+from reward import AGENT_YAWS
+from reward import OTHER_AGENTS_EXTENTS
+from reward import OTHER_AGENTS_POLYLINE
+from reward import OTHER_AGENTS_YAWS
 
-import copy
 
 # from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
 
@@ -34,6 +40,7 @@ class VectorOfflineRLModel(VectorizedModel):
             disable_map: bool,
             disable_lane_boundaries: bool,
             cfg: dict,
+            limit_predicted_yaw: bool = True,
     ) -> None:
         """ Initializes the model.
 
@@ -66,6 +73,11 @@ class VectorOfflineRLModel(VectorizedModel):
         num_outputs = len(weights_scaling)
         num_timesteps = num_targets // num_outputs
 
+        self.limit_predicted_yaw = limit_predicted_yaw
+
+        # todo
+        self.normalize_targets = False
+
         if self._d_global != self._d_local:
             self.global_from_local = nn.Linear(self._d_local, self._d_global)
 
@@ -91,13 +103,18 @@ class VectorOfflineRLModel(VectorizedModel):
     def mpc(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
 
         # calculate rewards
-        distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
-        min_distance_to_other = reward.get_distance_to_other_agents_per_batch(data_batch)
-        target_reward = -distance_to_center + min_distance_to_other
+        # distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
+        # min_distance_to_other = reward.get_distance_to_other_agents_per_batch(data_batch)
+        # target_reward = -distance_to_center + min_distance_to_other
 
-        trajectory_value = copy.deepcopy(target_reward)  # 初始轨迹值  相当于加上了r1
-        trajectory_len = 12  # 往前预测12次
+        # trajectory_value = copy.deepcopy(target_reward)  # 初始轨迹值  相当于加上了r1
+
+        # trajectory_len = 12  # 往前预测12次
+        history_num_frames = data_batch["history_availabilities"].shape[1] - 1
+        trajectory_len = self.cfg["train_data_loader"]["pred_len"]
         batch_size = self.cfg["train_data_loader"]["batch_size"]
+        device = data_batch["history_availabilities"].device
+
 
         # ==== LANES ====
         # batch size x num lanes x num vectors x num features
@@ -108,52 +125,150 @@ class VectorOfflineRLModel(VectorizedModel):
 
         max_num_vectors = max([data_batch[key].shape[-2] for key in polyline_keys])
 
-        map_polys = torch.cat([pad_points(data_batch[key], max_num_vectors) for key in polyline_keys], dim=1)
-        map_polys[..., -1].fill_(0)
+        static_polys = torch.cat([pad_points(data_batch[key], max_num_vectors) for key in polyline_keys], dim=1)
+        static_polys[..., -1].fill_(0)
 
         # batch size x num lanes x num vectors
-        map_availabilities = torch.cat([pad_avail(data_batch[key], max_num_vectors) for key in avail_keys], dim=1)
+        static_avail = torch.cat([pad_avail(data_batch[key], max_num_vectors) for key in avail_keys], dim=1)
 
+        # batch_size x (1 + M) x num vectors
+        # agents_availabilities = pad_avail(agents_availabilities, max_num_vectors)
+
+        # batch_size x (1 + M) x num features
+        lane_bdry_len = data_batch["lanes"].shape[1]
+
+        # === agents ===
+        agents_past_polys = torch.cat(
+            [data_batch["agent_trajectory_polyline"].unsqueeze(1), data_batch["other_agents_polyline"]], dim=1
+        )  # agent_trajectory_polyline 12，4，3    other_agents_polyline  12，30，4，3
         # batch_size x (1 + M) x seq len
-        agents_availabilities = torch.cat(
+        agents_past_avail = torch.cat(
             [
                 data_batch["agent_polyline_availability"].unsqueeze(1),
                 data_batch["other_agents_polyline_availability"],
             ],
             dim=1,
         )
-        # batch_size x (1 + M) x num vectors
-        agents_availabilities = pad_avail(agents_availabilities, max_num_vectors)
+        # ego_polys = torch.zeros(batch_size, )
+        trajectory_point_dim = 3
+        # avail_point_dim = agents_past_avail.shape[-1]
+        num_agents = agents_past_avail.shape[1]
+        agents_polys_horizon = torch.zeros((batch_size, num_agents, history_num_frames + 1 + trajectory_len,
+                                           trajectory_point_dim),
+                                           device=device)
+        agents_avail_horizon = torch.ones((batch_size, num_agents, history_num_frames + 1 + trajectory_len),
+                                          device=device)
+        # agents_avail = torch.zeros(batch_size, 1+num_agents, history_num_frames+1+trajectory_len, )
 
-        # batch_size x (1 + M) x num features
-        lane_bdry_len = data_batch["lanes"].shape[1]
+        agents_polys_horizon[:, :, :history_num_frames + 1] = torch.flip(agents_past_polys, [2])
+        agents_avail_horizon[:, :, :history_num_frames + 1] = torch.flip(agents_past_avail, [2])
 
-        for i in range(trajectory_len):
+        current_timestep = agents_past_polys.shape[2] - 1
+        window_size = agents_past_polys.shape[2]
+
+        one = torch.ones_like(data_batch["target_yaws"][:, 0])
+        zero = torch.zeros_like(data_batch["target_yaws"][:, 0])
+
+        # ====== Transformation between local spaces
+        # NOTE: we use the standard convention A_from_B to indicate that a matrix/yaw/translation
+        # converts a point from the B space into the A space
+        # e.g. if pB = (1,0) and A_from_B = (-1, 1) then pA = (0, 1)
+        # NOTE: we use the following convention for names:
+        # t0 -> space at 0, i.e. the space we pull out of the data for which ego is in (0, 0) with no yaw
+        # ts -> generic space at step t = s > 0 (predictions at t=s are in this space)
+        # tsplus -> space at s+1 (proposal new ts, built from prediction at t=s)
+        # A_from_B -> indicate a full 2x3 RT matrix from B to A
+        # yaw_A_from_B -> indicate a yaw from B to A
+        # tr_A_from_B -> indicate a translation (XY) from B to A
+        # NOTE: matrices (and yaw) we need to keep updated while we loop:
+        # t0_from_ts -> bring a point from the current space into the data one (e.g. for visualisation)
+        # ts_from_t0 -> bring a point from data space into the current one (e.g. to compute loss
+        t0_from_ts = torch.eye(3, device=one.device).unsqueeze(0).repeat(batch_size, 1, 1)
+        ts_from_t0 = t0_from_ts.clone()
+        yaw_t0_from_ts = zero
+        yaw_ts_from_t0 = zero
+
+        trajectory_value = torch.zeros(batch_size)
+
+        for idx in range(trajectory_len):
             # ==== AGENTS ====
             # batch_size x (1 + M) x seq len x self._vector_length
-            agents_polys = torch.cat(
-                [data_batch["agent_trajectory_polyline"].unsqueeze(1), data_batch["other_agents_polyline"]], dim=1
-            )  # agent_trajectory_polyline 12，4，3    other_agents_polyline  12，30，4，3
+            # agents_polys = torch.cat(
+            #     [data_batch["agent_trajectory_polyline"].unsqueeze(1), data_batch["other_agents_polyline"]], dim=1
+            # )  # agent_trajectory_polyline 12，4，3    other_agents_polyline  12，30，4，3
+
+            agents_polys_step = torch.flip(
+                agents_polys_horizon[:, :, current_timestep - window_size + 1:current_timestep + 1], [2]
+            ).clone()
+
+            # todo
+            agents_avail_step = agents_past_avail
+
             # batch_size x (1 + M) x num vectors x self._vector_length
-            agents_polys = pad_points(agents_polys, max_num_vectors)
+            agents_polys_step = pad_points(agents_polys_step, max_num_vectors)
+            agents_avail_step = pad_avail(agents_avail_step, max_num_vectors)
+
+            # transform agents and statics into right coordinate system (ts)
+            agents_polys_step = transform_points(agents_polys_step, ts_from_t0, agents_avail_step, yaw_ts_from_t0)
+            static_avail_step = static_avail.clone()
+            static_polys_step = transform_points(static_polys.clone(), ts_from_t0, static_avail_step)
+
             type_embedding = self.type_embedding(data_batch).transpose(0, 1)
 
             # call the model with these features
             outputs, attns, all_other_agent_prediction, reward_outputs, value_outputs = self.model_call(
-                agents_polys, map_polys, agents_availabilities, map_availabilities, type_embedding, lane_bdry_len
+                agents_polys_step,
+                static_polys_step,
+                agents_avail_step,
+                static_avail_step,
+                type_embedding,
+                lane_bdry_len
             )  # outputs: 12,12,3  ,  all_other_agent_prediction: 12,30,12,3 , reward_outputs: 12  , value_outputs: 12
 
-            # 更新data_batch
-            data_batch["agent_trajectory_polyline"] = torch.flip(outputs[:, :4, :].detach(), dims=[1])
-            # 只取前4个点，作为下一个状态 并颠倒s
-            data_batch["history_yaws"] = torch.flip(outputs[:, :4, -1].view(batch_size, 4, 1).detach(), dims=[1])
-            data_batch["other_agents_polyline"] = torch.flip(all_other_agent_prediction[:, :, :4, :].detach(), dims=[2])
-            # 只取前4个点，作为下一个状态
-            data_batch["all_other_agents_history_yaws"] = torch.flip(
-                all_other_agent_prediction[:, :, :4, -1].view(batch_size, 30, 4, 1).detach(), dims=[2])
-            # 只取前4个点，作为下一个状态
-            if i == 0:
-                first_step = outputs[:, :4, :]  # 轨迹中的第一步
+            # outputs are in ts space (optionally xy normalised)
+            pred_xy_step = outputs[:, 0, :2]
+            pred_yaw_step = outputs[:, 0, 2:3] if not self.limit_predicted_yaw else 0.3 * torch.tanh(outputs[:, 0, 2:3])
+
+            # todo normalise
+            pred_xy_step_unnorm = pred_xy_step
+            if self.normalize_targets:
+                pred_xy_step_unnorm = pred_xy_step * self.xy_scale[0]
+
+            # ==== SAVE PREDICTIONS & GT
+            pred_xy_step_t0 = pred_xy_step_unnorm[:, None, :] \
+                              @ t0_from_ts[..., :2, :2].transpose(1, 2) \
+                              + t0_from_ts[..., :2, -1:].transpose(1, 2)
+            pred_xy_step_t0 = pred_xy_step_t0[:, 0]
+            pred_yaw_step_t0 = pred_yaw_step + yaw_t0_from_ts
+
+
+            # ==== UPDATE HISTORY WITH INFORMATION FROM PREDICTION
+
+            # update transformation matrices
+            t0_from_ts, ts_from_t0, yaw_t0_from_ts, yaw_ts_from_t0 = self.update_transformation_matrices(
+                pred_xy_step_unnorm, pred_yaw_step, t0_from_ts, ts_from_t0, yaw_t0_from_ts, yaw_ts_from_t0, zero, one
+            )
+
+            # update AoI
+            agents_polys_horizon[:, 0, current_timestep+1, :2] = pred_xy_step_t0
+            agents_polys_horizon[:, 0, current_timestep+1, 2:3] = pred_yaw_step_t0
+            # agents_availabilities[:, 0]
+
+            # move time window one step into the future
+            current_timestep += 1
+
+            # todo
+            # # 更新data_batch
+            # data_batch["agent_trajectory_polyline"] = torch.flip(outputs[:, :4, :].detach(), dims=[1])
+            # # 只取前4个点，作为下一个状态 并颠倒s
+            # data_batch["history_yaws"] = torch.flip(outputs[:, :4, -1].view(batch_size, 4, 1).detach(), dims=[1])
+            # data_batch["other_agents_polyline"] = torch.flip(all_other_agent_prediction[:, :, :4, :].detach(), dims=[2])
+            # # 只取前4个点，作为下一个状态
+            # data_batch["all_other_agents_history_yaws"] = torch.flip(
+            #     all_other_agent_prediction[:, :, :4, -1].view(batch_size, 30, 4, 1).detach(), dims=[2])
+            # # 只取前4个点，作为下一个状态
+            if idx == 0:
+                first_step = outputs[:, :1, :]  # 轨迹中的第一步
 
             # calculate rewards
             distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
@@ -161,10 +276,9 @@ class VectorOfflineRLModel(VectorizedModel):
             target_reward = -distance_to_center + min_distance_to_other
             trajectory_value += target_reward
 
-            if i == trajectory_len - 1:
+            if idx == trajectory_len - 1:
                 trajectory_value += value_outputs
         return first_step, trajectory_value
-
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # ==== get additional info from the batch, or fall back to sensible defaults
@@ -231,7 +345,6 @@ class VectorOfflineRLModel(VectorizedModel):
         agents_avail = torch.cat([torch.flip(agents_past_avail.contiguous(), [2]), agents_future_avail], dim=2)
         agents_extent = torch.cat([torch.flip(agents_past_extent, [2]), agents_future_extent], dim=2)
 
-
         window_size = agents_past_polys.shape[2]  # (history_num_frames + 1)
         current_timestep = agents_past_polys.shape[2] - 1
         num_frames_per_sample = agents_polys.shape[2]
@@ -263,13 +376,13 @@ class VectorOfflineRLModel(VectorizedModel):
             AGENT_YAWS: agents_polys[:, 0, :, 2:3],
             AGENT_EXTENT: agents_extent[:, 0],
             OTHER_AGENTS_POLYLINE: agents_polys[:, 1:, :, :],
-            OTHER_AGENTS_YAWS: agents_polys[:, 1:, :,  2:3],
+            OTHER_AGENTS_YAWS: agents_polys[:, 1:, :, 2:3],
             OTHER_AGENTS_EXTENTS: agents_extent[:, 1:, :],
             "all_other_agents_types": data_batch["all_other_agents_types"],
         }
         min_distance_to_other = torch.stack([
             reward.get_distance_to_other_agents_per_batch(batch_bind_history_future, idx) for idx in range(
-                current_timestep+1, history_num_frames+1+future_num_frames)]
+                current_timestep + 1, history_num_frames + 1 + future_num_frames)]
         )
         # batch x future_frame
         min_distance_to_other = min_distance_to_other.transpose(1, 0)
@@ -449,3 +562,56 @@ class VectorOfflineRLModel(VectorizedModel):
         value_outputs, _ = self.value_head(all_embs, type_embedding, invalid_polys)
 
         return outputs, attns, all_other_agent_prediction, reward_outputs.view(-1), value_outputs.view(-1)
+
+    # refer to closed_loop_model
+    def update_transformation_matrices(self, pred_xy_step_unnorm: torch.Tensor, pred_yaw_step: torch.Tensor,
+                                       t0_from_ts: torch.Tensor, ts_from_t0: torch.Tensor, yaw_t0_from_ts: torch.Tensor,
+                                       yaw_ts_from_t0: torch.Tensor, zero: torch.Tensor, one: torch.Tensor
+                                       ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """ Updates the used transformation matrices to reflect AoI's new position.
+        """
+        tr_tsplus_from_ts = -pred_xy_step_unnorm
+        yaw_tsplus_from_ts = -pred_yaw_step
+        yaw_ts_from_tsplus = pred_yaw_step
+
+        # NOTE: these are full roto-translation matrices. We use the closed form and not invert for performance reasons.
+        # tsplus_from_ts will bring the current predictions at ts into 0.
+        tsplus_from_ts = torch.cat(
+            [
+                yaw_tsplus_from_ts.cos(),
+                -yaw_tsplus_from_ts.sin(),
+                tr_tsplus_from_ts[:, :1] * yaw_tsplus_from_ts.cos()
+                - tr_tsplus_from_ts[:, 1:] * yaw_tsplus_from_ts.sin(),
+                yaw_tsplus_from_ts.sin(),
+                yaw_tsplus_from_ts.cos(),
+                tr_tsplus_from_ts[:, :1] * yaw_tsplus_from_ts.sin()
+                + tr_tsplus_from_ts[:, 1:] * yaw_tsplus_from_ts.cos(),
+                zero,
+                zero,
+                one,
+                ],
+            dim=1,
+        ).view(-1, 3, 3)
+        # this is only required to keep t0_from_ts updated
+        ts_from_tsplus = torch.cat(
+            [
+                yaw_ts_from_tsplus.cos(),
+                -yaw_ts_from_tsplus.sin(),
+                -tr_tsplus_from_ts[:, :1],
+                yaw_ts_from_tsplus.sin(),
+                yaw_ts_from_tsplus.cos(),
+                -tr_tsplus_from_ts[:, 1:],
+                zero,
+                zero,
+                one,
+            ],
+            dim=1,
+        ).view(-1, 3, 3)
+
+        # update RTs and yaws by including tsplus (next step ts)
+        t0_from_ts = t0_from_ts @ ts_from_tsplus
+        ts_from_t0 = tsplus_from_ts @ ts_from_t0
+        yaw_t0_from_ts = yaw_t0_from_ts + yaw_ts_from_tsplus
+        yaw_ts_from_t0 = yaw_ts_from_t0 + yaw_tsplus_from_ts
+
+        return t0_from_ts, ts_from_t0, yaw_t0_from_ts, yaw_ts_from_t0
