@@ -13,6 +13,7 @@ import reward
 from reward import AGENT_TRAJECTORY_POLYLINE, AGENT_YAWS, AGENT_EXTENT
 from reward import OTHER_AGENTS_POLYLINE, OTHER_AGENTS_YAWS, OTHER_AGENTS_EXTENTS
 
+import copy
 
 # from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
 
@@ -86,6 +87,84 @@ class VectorOfflineRLModel(VectorizedModel):
         self.value_head = MultiheadAttentionGlobalHead(
             self._d_global, 1, 1, dropout=self._global_head_dropout
         )
+
+    def mpc(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+
+        # calculate rewards
+        distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
+        min_distance_to_other = reward.get_distance_to_other_agents_per_batch(data_batch)
+        target_reward = -distance_to_center + min_distance_to_other
+
+        trajectory_value = copy.deepcopy(target_reward)  # 初始轨迹值  相当于加上了r1
+        trajectory_len = 12  # 往前预测12次
+        batch_size = self.cfg["train_data_loader"]["batch_size"]
+
+        # ==== LANES ====
+        # batch size x num lanes x num vectors x num features
+        polyline_keys = ["lanes_mid", "crosswalks"]
+        if not self.disable_lane_boundaries:
+            polyline_keys += ["lanes"]
+        avail_keys = [f"{k}_availabilities" for k in polyline_keys]
+
+        max_num_vectors = max([data_batch[key].shape[-2] for key in polyline_keys])
+
+        map_polys = torch.cat([pad_points(data_batch[key], max_num_vectors) for key in polyline_keys], dim=1)
+        map_polys[..., -1].fill_(0)
+
+        # batch size x num lanes x num vectors
+        map_availabilities = torch.cat([pad_avail(data_batch[key], max_num_vectors) for key in avail_keys], dim=1)
+
+        # batch_size x (1 + M) x seq len
+        agents_availabilities = torch.cat(
+            [
+                data_batch["agent_polyline_availability"].unsqueeze(1),
+                data_batch["other_agents_polyline_availability"],
+            ],
+            dim=1,
+        )
+        # batch_size x (1 + M) x num vectors
+        agents_availabilities = pad_avail(agents_availabilities, max_num_vectors)
+
+        # batch_size x (1 + M) x num features
+        lane_bdry_len = data_batch["lanes"].shape[1]
+
+        for i in range(trajectory_len):
+            # ==== AGENTS ====
+            # batch_size x (1 + M) x seq len x self._vector_length
+            agents_polys = torch.cat(
+                [data_batch["agent_trajectory_polyline"].unsqueeze(1), data_batch["other_agents_polyline"]], dim=1
+            )  # agent_trajectory_polyline 12，4，3    other_agents_polyline  12，30，4，3
+            # batch_size x (1 + M) x num vectors x self._vector_length
+            agents_polys = pad_points(agents_polys, max_num_vectors)
+            type_embedding = self.type_embedding(data_batch).transpose(0, 1)
+
+            # call the model with these features
+            outputs, attns, all_other_agent_prediction, reward_outputs, value_outputs = self.model_call(
+                agents_polys, map_polys, agents_availabilities, map_availabilities, type_embedding, lane_bdry_len
+            )  # outputs: 12,12,3  ,  all_other_agent_prediction: 12,30,12,3 , reward_outputs: 12  , value_outputs: 12
+
+            # 更新data_batch
+            data_batch["agent_trajectory_polyline"] = torch.flip(outputs[:, :4, :].detach(), dims=[1])
+            # 只取前4个点，作为下一个状态 并颠倒s
+            data_batch["history_yaws"] = torch.flip(outputs[:, :4, -1].view(batch_size, 4, 1).detach(), dims=[1])
+            data_batch["other_agents_polyline"] = torch.flip(all_other_agent_prediction[:, :, :4, :].detach(), dims=[2])
+            # 只取前4个点，作为下一个状态
+            data_batch["all_other_agents_history_yaws"] = torch.flip(
+                all_other_agent_prediction[:, :, :4, -1].view(batch_size, 30, 4, 1).detach(), dims=[2])
+            # 只取前4个点，作为下一个状态
+            if i == 0:
+                first_step = outputs[:, :4, :]  # 轨迹中的第一步
+
+            # calculate rewards
+            distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
+            min_distance_to_other = reward.get_distance_to_other_agents_per_batch(data_batch)
+            target_reward = -distance_to_center + min_distance_to_other
+            trajectory_value += target_reward
+
+            if i == trajectory_len - 1:
+                trajectory_value += value_outputs
+        return first_step, trajectory_value
+
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # ==== get additional info from the batch, or fall back to sensible defaults
