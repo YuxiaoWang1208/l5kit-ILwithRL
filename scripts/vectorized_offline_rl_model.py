@@ -232,7 +232,8 @@ class VectorOfflineRLModel(VectorizedModel):
             # only select the first step
             pred_other_agents_xy_step = all_other_agent_prediction[:, :, 0, :2]
             pred_other_agents_yaw_step = all_other_agent_prediction[:, :, 0,
-                                         2:3] if not self.limit_predicted_yaw else 0.3 * torch.tanh(outputs[:, 1:, 2:3])
+                                         2:3] if not self.limit_predicted_yaw else 0.3 * torch.tanh(
+                all_other_agent_prediction[:, :, 0, 2:3])
 
             # todo normalise
             pred_xy_step_unnorm = pred_xy_step
@@ -257,12 +258,15 @@ class VectorOfflineRLModel(VectorizedModel):
             pred_xy_step_t0 = pred_xy_step_t0[:, 0]
             pred_yaw_step_t0 = pred_yaw_step + yaw_t0_from_ts
 
-            pred_other_agents_xy_step_t0 = torch.zeros_like(pred_other_agents_xy_step_unnorm)
-            for agents_idx in range(pred_other_agents_xy_step_unnorm.shape[1]):
-                agents_xy = pred_other_agents_xy_step_unnorm[:, agents_idx]
-                agents_xy_t0 = get_point(agents_xy, t0_from_ts)
-                pred_other_agents_xy_step_t0[:, agents_idx] = agents_xy_t0[:, 0]
+            # one implementation
+            # pred_other_agents_xy_step_t0 = torch.zeros_like(pred_other_agents_xy_step_unnorm)
+            # for agents_idx in range(pred_other_agents_xy_step_unnorm.shape[1]):
+            #     agents_xy = pred_other_agents_xy_step_unnorm[:, agents_idx]
+            #     agents_xy_t0 = get_point(agents_xy, t0_from_ts)
+            #     pred_other_agents_xy_step_t0[:, agents_idx] = agents_xy_t0[:, 0]
 
+            # another implementation
+            pred_other_agents_xy_step_t0 = get_point(pred_other_agents_xy_step_unnorm, t0_from_ts)[:, 0]
             pred_other_agnets_yaw_step_t0 = pred_other_agents_yaw_step + yaw_t0_from_ts.unsqueeze(1)
 
             # ==== UPDATE HISTORY WITH INFORMATION FROM PREDICTION
@@ -275,7 +279,12 @@ class VectorOfflineRLModel(VectorizedModel):
             # update AoI
             agents_polys_horizon[:, 0, current_timestep + 1, :2] = pred_xy_step_t0
             agents_polys_horizon[:, 0, current_timestep + 1, 2:3] = pred_yaw_step_t0
-            agents_polys_horizon[:, 1:, current_timestep + 1, :2] = agents_polys_horizon[:, 1:, current_timestep, :2]
+            agents_polys_horizon[:, 1:, current_timestep + 1, :2] = pred_other_agents_xy_step_t0
+            agents_polys_horizon[:, 1:, current_timestep + 1, 2:3] = pred_other_agnets_yaw_step_t0
+
+            agents_avail_horizon[:, 0, current_timestep + 1] = 1
+            agents_avail_horizon[:, 1:, current_timestep + 1] = agents_avail_horizon[:, 1:, current_timestep]
+
             # agents_availabilities[:, 0]
 
             # move time window one step into the future
