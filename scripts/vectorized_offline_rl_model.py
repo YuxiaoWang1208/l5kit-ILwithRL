@@ -112,7 +112,9 @@ class VectorOfflineRLModel(VectorizedModel):
         # trajectory_len = 12  # 往前预测12次
         history_num_frames = data_batch["history_availabilities"].shape[1] - 1
         trajectory_len = self.cfg["train_data_loader"]["pred_len"]
-        batch_size = self.cfg["train_data_loader"]["batch_size"]
+        # batch_size = self.cfg["train_data_loader"]["batch_size"]
+
+        batch_size = data_batch["history_availabilities"].shape[0]
         device = data_batch["history_availabilities"].device
 
         # ==== LANES ====
