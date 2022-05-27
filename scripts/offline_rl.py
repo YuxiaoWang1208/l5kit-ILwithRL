@@ -137,7 +137,7 @@ def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
     # print(eval_dataset)
 
     num_scenes_to_unroll = 1
-    num_simulation_steps = 50
+    num_simulation_steps = 200
 
     # for model in model_list:
     #     # prepare for training
@@ -213,15 +213,22 @@ def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
     #         final_first_step[i] = first_step[index[i], i, :, :]
     #
     #     print(index, final_first_step)
+    return agg
 
 
-def train(model, train_dataset, cfg, writer, model_name):
+def train(model, train_dataset, eval_dataset, cfg, writer, model_name):
     # todo
     # cfg["train_params"]["max_num_steps"] = int(1e8)
 
     train_cfg = cfg["train_data_loader"]
     train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
                                   num_workers=train_cfg["num_workers"])
+    # eval_dataset = train_dataset
+
+    eval_cfg = cfg["val_data_loader"]
+    dm = LocalDataManager(None)
+    eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
+
     losses_train = []
     # training loops
     tr_it = iter(train_dataloader)
@@ -270,6 +277,7 @@ def train(model, train_dataset, cfg, writer, model_name):
         # progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
 
         if n_iter % cfg["train_params"]["checkpoint_every_n_steps"] == 0:
+
             # save model
             # to_save = torch.jit.script(model.cpu())
             dir_to_save = Path(project_path, "tmp", model_name)
@@ -280,7 +288,19 @@ def train(model, train_dataset, cfg, writer, model_name):
             torch.save(model.state_dict(), path_to_save)
             print(f"MODEL STORED at {path_to_save}")
 
-        evaluation(model, eval_type="close_loop")
+        if n_iter % cfg["train_params"]["eval_every_n_steps"] == 0:
+            # evaluation(model, eval_type="close_loop")
+            model.eval()
+            eval_results = evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="closed_loop")
+
+            writer.add_scalar(f'Eval/displacement_error_l2', eval_results["displacement_error_l2"].item(), n_iter)
+            writer.add_scalar(f'Eval/distance_ref_trajectory', eval_results["distance_ref_trajectory"].item(), n_iter)
+            writer.add_scalar(f'Eval/collision_front', eval_results["collision_front"].item(), n_iter)
+            writer.add_scalar(f'Eval/collision_rear', eval_results["collision_rear"].item(), n_iter)
+            writer.add_scalar(f'Eval/collision_side', eval_results["collision_side"].item(), n_iter)
+
+            model.train()
+            torch.set_grad_enabled(True)
 
 
 
@@ -345,15 +365,15 @@ if __name__ == '__main__':
 
 
     model = EnsembleOfflineRLModel(model_list)
-    # train(model, train_dataset, cfg, logger, model_name=model_log_id)
+    train(model, train_dataset, eval_dataset, cfg, logger, model_name=model_log_id)
 
 
     # ===== INIT DATASET
-    eval_cfg = cfg["val_data_loader"]
-    dm = LocalDataManager(None)
-    eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
-
-    evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="closed_loop")
+    # eval_cfg = cfg["val_data_loader"]
+    # dm = LocalDataManager(None)
+    # eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
+    #
+    # evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="closed_loop")
 
     # ===== INIT DATASET
     # dm = LocalDataManager(None)
