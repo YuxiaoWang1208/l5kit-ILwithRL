@@ -30,7 +30,7 @@ print("project path: ", project_path)
 sys.path.append(project_path)
 print(sys.path)
 
-from scripts.vectorized_offline_rl_model import VectorOfflineRLModel
+from scripts.vectorized_offline_rl_model import VectorOfflineRLModel, EnsembleOfflineRLModel
 from pathlib import Path
 
 os.environ["L5KIT_DATA_FOLDER"] = "/mnt/share_disk/user/public/l5kit/prediction"
@@ -239,22 +239,27 @@ def train(model, train_dataset, cfg, writer, model_name):
         data = {k: v.to(device) for k, v in data.items()}
         # if len(data['extent']) < train_cfg["batch_size"] + train_cfg["pred_len"]:  #数据量不够
         #     continue
-        result = model(data)
-        loss = result["loss"]
 
-        writer.add_scalar('Loss/train', loss.item(), n_iter)
-        writer.add_scalar('Loss/train_policy_loss', result["loss_imitate"].item(), n_iter)
-        writer.add_scalar('Loss/train_prediction_loss', result["loss_other_agent_pred"].item(), n_iter)
-        writer.add_scalar('Loss/train_reward_loss', result["loss_reward"].item(), n_iter)
-        writer.add_scalar('Loss/train_value_loss', result["loss_value"].item(), n_iter)
+        # first_step, agents_polys_horizon, trajectory_value = model.inference(data)
+
+        result_list = model(data)
+        optimizer.zero_grad()
+
+        for idx, result in enumerate(result_list):
+            loss = result["loss"]
+            writer.add_scalar(f'Loss/model_{idx}_train', loss.item(), n_iter)
+            writer.add_scalar(f'Loss/model_{idx}_train_policy_loss', result["loss_imitate"].item(), n_iter)
+            writer.add_scalar(f'Loss/model_{idx}_train_prediction_loss', result["loss_other_agent_pred"].item(), n_iter)
+            writer.add_scalar(f'Loss/model_{idx}_train_reward_loss', result["loss_reward"].item(), n_iter)
+            writer.add_scalar(f'Loss/model_{idx}_train_value_loss', result["loss_value"].item(), n_iter)
+
+            loss.backward()
 
         # Backward pass
-        optimizer.zero_grad()
-        loss.backward()
         optimizer.step()
 
-        losses_train.append(loss.item())
-        progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
+        # losses_train.append(loss.item())
+        # progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
 
         if n_iter % cfg["train_params"]["checkpoint_every_n_steps"] == 0:
             # save model
@@ -321,13 +326,19 @@ if __name__ == '__main__':
     }
     logger, model_log_id = init_logger(model_name, log_name)
 
-    # train(model, train_dataset, cfg, logger, model_name=model_log_id)
+    # train(model_list[0], train_dataset, cfg, logger, model_name=model_log_id)
 
+
+    model = EnsembleOfflineRLModel(model_list)
+    train(model, train_dataset, cfg, logger, model_name=model_log_id)
 
     # ===== INIT DATASET
-    dm = LocalDataManager(None)
-    eval_cfg = cfg["val_data_loader"]
-    eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
-    vectorizer = build_vectorizer(cfg, dm)
-    eval_dataset = EgoDatasetVectorized(cfg, eval_zarr, vectorizer)
-    evaluation(model_list, eval_dataset, cfg, logger, model_name=model_log_id)
+    # dm = LocalDataManager(None)
+    # eval_cfg = cfg["val_data_loader"]
+    # eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
+    # vectorizer = build_vectorizer(cfg, dm)
+    # eval_dataset = EgoDatasetVectorized(cfg, eval_zarr, vectorizer)
+    #
+    # infer_model = None
+    #
+    # evaluation(infer_model, eval_dataset, cfg, logger, model_name=model_log_id)

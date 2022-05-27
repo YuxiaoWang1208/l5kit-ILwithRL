@@ -20,8 +20,29 @@ from reward import OTHER_AGENTS_EXTENTS
 from reward import OTHER_AGENTS_POLYLINE
 from reward import OTHER_AGENTS_YAWS
 
+from torch import optim
 
 # from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
+
+class EnsembleOfflineRLModel(nn.Module):
+    def __init__(self, models):
+        super().__init__()
+        self.models= nn.ModuleList(models)
+        # self.optimizer = optim.Adam(self.parameters(), lr=1e-3)
+
+    def forward(self, data):
+        if self.training:
+            # results = [model(data) for model, data in zip(self.models, data_list)]
+            results = [model(data) for model in self.models]
+            return results
+        else:
+            pass
+
+
+
+
+
+
 
 
 class VectorOfflineRLModel(VectorizedModel):
@@ -100,7 +121,7 @@ class VectorOfflineRLModel(VectorizedModel):
             self._d_global, 1, 1, dropout=self._global_head_dropout
         )
 
-    def mpc(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def inference(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
 
         # calculate rewards
         # distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
@@ -324,6 +345,7 @@ class VectorOfflineRLModel(VectorizedModel):
             # target_reward = reward_outputs
             trajectory_value += reward_outputs
 
+            # todo 好像应该输出下一步状态值
             if idx == trajectory_len - 1:
                 trajectory_value += value_outputs
 
@@ -396,7 +418,7 @@ class VectorOfflineRLModel(VectorizedModel):
 
         window_size = agents_past_polys.shape[2]  # (history_num_frames + 1)
         current_timestep = agents_past_polys.shape[2] - 1
-        num_frames_per_sample = agents_polys.shape[2]
+        # num_frames_per_sample = agents_polys.shape[2]
 
         # Load and prepare vectors for the model call, split into map and agents
 
