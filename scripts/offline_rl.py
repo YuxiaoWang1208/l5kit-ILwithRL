@@ -122,7 +122,7 @@ def train(model, train_dataset, cfg, writer, model_name):
     # cfg["train_params"]["max_num_steps"] = int(1e8)
 
     train_cfg = cfg["train_data_loader"]
-    train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"] + train_cfg["pred_len"],
+    train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
                                   num_workers=train_cfg["num_workers"])
     losses_train = []
     # training loops
@@ -144,8 +144,8 @@ def train(model, train_dataset, cfg, writer, model_name):
             data = next(tr_it)
         # Forward pass
         data = {k: v.to(device) for k, v in data.items()}
-        if len(data['extent']) < train_cfg["batch_size"] + train_cfg["pred_len"]:  #数据量不够
-            continue
+        # if len(data['extent']) < train_cfg["batch_size"] + train_cfg["pred_len"]:  #数据量不够
+        #     continue
         result = model(data)
         loss = result["loss"]
 
