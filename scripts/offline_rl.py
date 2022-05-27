@@ -132,18 +132,9 @@ def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
 
     # todo to variable
 
-    # vectorizer = build_vectorizer(cfg, dm)
-    # eval_dataset = EgoDatasetVectorized(cfg, eval_zarr, vectorizer)
-    # print(eval_dataset)
-
     num_scenes_to_unroll = 1
     num_simulation_steps = 200
 
-    # for model in model_list:
-    #     # prepare for training
-    #     model = model.to(device)
-    #     model.eval()
-    # model.load_state_dict(torch.load(Path(project_path, "tmp", model_name, "iter_0010000.pt")))
 
     if eval_type == "closed_loop":
         # ==== DEFINE CLOSED-LOOP SIMULATION
@@ -186,33 +177,6 @@ def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
 
         print(agg)
 
-    # progress_bar = tqdm(range(int(cfg["train_params"]["max_num_steps"])))
-    #
-    # for n_iter in progress_bar:
-    #     try:
-    #         data = next(tr_it)
-    #     except StopIteration:
-    #         tr_it = iter(train_dataloader)
-    #         data = next(tr_it)
-    #     # Forward pass
-    #     data = {k: v.to(device) for k, v in data.items()}
-    #
-    #     first_step_list = []
-    #     trajectory_value_list = []
-    #     for model in model_list:
-    #         first_step, trajectory_value = model.mpc(data)  # 得到第一条轨迹的第一个d
-    #         first_step_list.append(first_step)
-    #         trajectory_value_list.append(trajectory_value)
-    #
-    #     first_step = torch.stack(first_step_list, dim=0)
-    #     trajectory_value = torch.stack(trajectory_value_list, dim=0)
-    #     index = torch.argmax(trajectory_value, dim=0)
-    #     final_first_step = torch.zeros_like(first_step)
-    #
-    #     for i in range(len(index)):
-    #         final_first_step[i] = first_step[index[i], i, :, :]
-    #
-    #     print(index, final_first_step)
     return agg
 
 
@@ -249,13 +213,6 @@ def train(model, train_dataset, eval_dataset, cfg, writer, model_name):
             data = next(tr_it)
         # Forward pass
         data = {k: v.to(device) for k, v in data.items()}
-        # if len(data['extent']) < train_cfg["batch_size"] + train_cfg["pred_len"]:  #数据量不够
-        #     continue
-
-        # first_step, agents_polys_horizon, trajectory_value = model.inference(data)
-
-        # model.eval()
-        # final_first_step = model.mpc(data)
 
         result_list = model(data)
         optimizer.zero_grad()

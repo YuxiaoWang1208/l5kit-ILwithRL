@@ -20,14 +20,13 @@ from reward import OTHER_AGENTS_EXTENTS
 from reward import OTHER_AGENTS_POLYLINE
 from reward import OTHER_AGENTS_YAWS
 
-from torch import optim
 
 # from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
 
 class EnsembleOfflineRLModel(nn.Module):
     def __init__(self, models):
         super().__init__()
-        self.models= nn.ModuleList(models)
+        self.models = nn.ModuleList(models)
         # self.optimizer = optim.Adam(self.parameters(), lr=1e-3)
 
     def forward(self, data):
@@ -64,7 +63,6 @@ class EnsembleOfflineRLModel(nn.Module):
         }
 
         return eval_dict
-
 
 
 class VectorOfflineRLModel(VectorizedModel):
