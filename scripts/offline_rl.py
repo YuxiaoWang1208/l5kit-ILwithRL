@@ -369,7 +369,7 @@ if __name__ == '__main__':
     pred_loss_weight = args.pred_loss_weight
     flag = args.flag
 
-    cfg = load_config_data(str(Path(project_path, "scripts_/offline_rl_config.yaml")))
+    cfg = load_config_data(str(Path(project_path, "scripts/offline_rl_config.yaml")))
     cfg.update(vars(args))
     print(cfg)
 
