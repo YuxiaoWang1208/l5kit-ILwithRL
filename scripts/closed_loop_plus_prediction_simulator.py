@@ -157,7 +157,7 @@ if __name__ == '__main__':
     print("project path: ", project_path)
     sys.path.append(project_path)
 
-    from scripts.vectorized_offlin_rl_model import VectorOfflineRLModel
+    from scripts_.vectorized_offline_rl_model import VectorOfflineRLModel
     # prepare data path and load cfg
     os.environ["L5KIT_DATA_FOLDER"] = "/mnt/share_disk/user/public/l5kit/prediction"
 
