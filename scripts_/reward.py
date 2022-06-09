@@ -217,7 +217,7 @@ def get_distance_to_other_agents_per_batch(_batch, _frame_idx):
     # agent_ix = 25
 
     agents_type = _batch["all_other_agents_types"]
-    agents_extent = torch.mean(_batch[OTHER_AGENTS_EXTENTS][:, :, 0, :], axis=2)
+    agents_extent = torch.mean(_batch[OTHER_AGENTS_EXTENTS][:, :, _frame_idx, :], axis=2)
     # print("agent_extent")
     # print(agents_extent)
 

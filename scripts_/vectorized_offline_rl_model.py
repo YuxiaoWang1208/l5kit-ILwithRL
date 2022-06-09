@@ -12,13 +12,13 @@ from l5kit.planning.vectorized.global_graph import MultiheadAttentionGlobalHead
 from l5kit.planning.vectorized.open_loop_model import VectorizedModel
 from torch import nn
 
-import reward
-from reward import AGENT_EXTENT
-from reward import AGENT_TRAJECTORY_POLYLINE
-from reward import AGENT_YAWS
-from reward import OTHER_AGENTS_EXTENTS
-from reward import OTHER_AGENTS_POLYLINE
-from reward import OTHER_AGENTS_YAWS
+from scripts_ import reward
+from scripts_.reward import AGENT_EXTENT
+from scripts_.reward import AGENT_TRAJECTORY_POLYLINE
+from scripts_.reward import AGENT_YAWS
+from scripts_.reward import OTHER_AGENTS_EXTENTS
+from scripts_.reward import OTHER_AGENTS_POLYLINE
+from scripts_.reward import OTHER_AGENTS_YAWS
 
 
 # from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
@@ -36,6 +36,15 @@ class EnsembleOfflineRLModel(nn.Module):
             return results
         else:
             return self.mpc(data)
+
+            # #只考虑策略网络输出
+            # first_step, _, trajectory_value = self.models[0].inference(data)
+            # eval_dict = {
+            #     "positions": first_step[..., :2],
+            #     "yaws": first_step[..., 2:3],
+            # }
+            # return eval_dict
+
 
     def mpc(self, data):
 
@@ -151,6 +160,7 @@ class VectorOfflineRLModel(VectorizedModel):
         # trajectory_value = copy.deepcopy(target_reward)  # 初始轨迹值  相当于加上了r1
 
         # trajectory_len = 12  # 往前预测12次
+        # future_num_frames = data_batch["target_availabilities"].shape[1]
         history_num_frames = data_batch["history_availabilities"].shape[1] - 1
         trajectory_len = self.cfg["train_data_loader"]["pred_len"]
         # batch_size = self.cfg["train_data_loader"]["batch_size"]
@@ -363,6 +373,7 @@ class VectorOfflineRLModel(VectorizedModel):
             #     data_batch, )
             # target_reward = -distance_to_center + min_distance_to_other
             # target_reward = reward_outputs
+            # trajectory_value += reward_outputs
             trajectory_value += reward_outputs
 
             # todo 好像应该输出下一步状态值
@@ -387,6 +398,7 @@ class VectorOfflineRLModel(VectorizedModel):
         agents_past_extent = torch.cat(
             [data_batch["history_extents"].unsqueeze(1), data_batch["all_other_agents_history_extents"]], dim=1
         )
+
 
         # ==== Static (LANES) info ====
         # batch size x num lanes x num vectors x num features
@@ -450,7 +462,7 @@ class VectorOfflineRLModel(VectorizedModel):
         # todo add aval for lanes_mid
         # flip() is used to transform [t-3, t-2, t-1, t] into [t, t-1, t-2, t-3]
         ego_distance_to_centroid = torch.stack([reward.get_distance_to_centroid_by_element(
-            torch.flip(ego_polys_samples[:, idx, :, :2], [1]), data_batch["lanes_mid"][..., :2]) for idx in
+            ego_polys_samples[:, idx, :, :2], data_batch["lanes_mid"][..., :2]) for idx in
             range(ego_polys_samples.shape[1])
         ])
         # batch_size x future_frame (t, t+1, ..., t+future_frame)
@@ -463,12 +475,12 @@ class VectorOfflineRLModel(VectorizedModel):
         # ego: batch_size x (history_frame + 1 + future_frame) x dim
         # agents: batch_size x num_agents x (history_frame + 1 + future_frame) x dim
         batch_bind_history_future = {
-            AGENT_TRAJECTORY_POLYLINE: agents_polys[:, 0],
+            AGENT_TRAJECTORY_POLYLINE: agents_polys[:, 0, :, :],
             AGENT_YAWS: agents_polys[:, 0, :, 2:3],
-            AGENT_EXTENT: agents_extent[:, 0],
+            AGENT_EXTENT: agents_extent[:, 0, :, :],
             OTHER_AGENTS_POLYLINE: agents_polys[:, 1:, :, :],
             OTHER_AGENTS_YAWS: agents_polys[:, 1:, :, 2:3],
-            OTHER_AGENTS_EXTENTS: agents_extent[:, 1:, :],
+            OTHER_AGENTS_EXTENTS: agents_extent[:, 1:, :, :],
             "all_other_agents_types": data_batch["all_other_agents_types"],
         }
         min_distance_to_other = torch.stack([
@@ -488,6 +500,9 @@ class VectorOfflineRLModel(VectorizedModel):
         assert pred_len <= future_num_frames
         truncated_value = target_reward_all[:, :pred_len].sum(axis=1)
 
+
+
+
         # for element_ix in range(batch_size):
         #     truncated_value = sum(target_reward[element_ix + 1:element_ix + pred_len + 1])
         #     truncated_value_batch.append(truncated_value)
@@ -505,7 +520,7 @@ class VectorOfflineRLModel(VectorizedModel):
         lane_bdry_len = data_batch["lanes"].shape[1]
 
         # call the model with these features
-        outputs, attns, all_other_agent_prediction, reward_outputs, value_outputs = self.model_call(
+        outputs, attns, all_other_agent_prediction , reward_outputs, value_outputs= self.model_call(
             agents_polys,
             static_polys,
             agents_availabilities,
@@ -563,10 +578,12 @@ class VectorOfflineRLModel(VectorizedModel):
             # data_batch,data_batch["all_other_agents_history_positions"][0], data_batch['other_agents_polyline'][0],data_batch['all_other_agents_future_positions'][0],data_batch['target_positions'][0], data_batch['agent_trajectory_polyline'][0],data_batch['agent_from_world']
 
             loss = self.cfg['imitate_loss_weight'] * loss_imitate + self.cfg[
-                'pred_loss_weight'] * loss_other_agent_pred + loss_reward + loss_value
+                'pred_loss_weight'] * loss_other_agent_pred+ loss_reward + loss_value * 0.02
+
 
             train_dict = {"loss": loss, "loss_imitate": loss_imitate, "loss_other_agent_pred": loss_other_agent_pred,
                           "loss_reward": loss_reward, "loss_value": loss_value}
+
             return train_dict
         else:
             pred_positions, pred_yaws = outputs[..., :2], outputs[..., 2:3]
@@ -652,7 +669,7 @@ class VectorOfflineRLModel(VectorizedModel):
 
         value_outputs, _ = self.value_head(all_embs, type_embedding, invalid_polys)
 
-        return outputs, attns, all_other_agent_prediction, reward_outputs.view(-1), value_outputs.view(-1)
+        return outputs, attns, all_other_agent_prediction ,reward_outputs.view(-1), value_outputs.view(-1)
 
     # refer to closed_loop_model
     def update_transformation_matrices(self, pred_xy_step_unnorm: torch.Tensor, pred_yaw_step: torch.Tensor,

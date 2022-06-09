@@ -8,7 +8,7 @@ Welcome to **L5Kit**. L5Kit is a Python library with functionality for the devel
 ### Run imitation learning and motion prediction (model learning)
 
 ```bash
-python scripts/offline_rl.py --imitate_loss_weight 1 --pred_loss_weight 1 --cuda_id 1
+python scripts_/offline_rl.py --imitate_loss_weight 1 --pred_loss_weight 1 --cuda_id 1
 ```
 
 **Trained models**

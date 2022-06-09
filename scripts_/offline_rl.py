@@ -24,13 +24,14 @@ from l5kit.cle.validators import RangeValidator, ValidationCountingAggregator
 
 from l5kit.simulation.dataset import SimulationConfig
 from l5kit.simulation.unroll import ClosedLoopSimulator
+from multiprocessing import Process
 
 project_path = str(Path(__file__).parents[1])
 print("project path: ", project_path)
 sys.path.append(project_path)
 print(sys.path)
 
-from scripts.vectorized_offline_rl_model import VectorOfflineRLModel, EnsembleOfflineRLModel
+from vectorized_offline_rl_model import VectorOfflineRLModel, EnsembleOfflineRLModel
 from pathlib import Path
 
 os.environ["L5KIT_DATA_FOLDER"] = "/mnt/share_disk/user/public/l5kit/prediction"
@@ -109,9 +110,10 @@ def load_model(model_name):
     return model
 
 
-def init_logger(model_name, log_name):
+def init_logger(model_name, log_name,date):
     # tensorboard for log
     log_id = (
+        f"train_flag_{log_name['train_flag']}"
         f"signal_scene_{log_name['traffic_signal_scene_id']}"
         f"-il_weight_{log_name['imitate_loss_weight']}"
         f"-pred_weight_{log_name['pred_loss_weight']}"
@@ -119,7 +121,7 @@ def init_logger(model_name, log_name):
     )
     model_log_id = f"{model_name}-{log_id}"
 
-    log_dir = Path(project_path, "logs")
+    log_dir = Path(project_path, "logs"+str(date))
     writer = SummaryWriter(log_dir=f"{log_dir}/{model_log_id}")
     return writer, model_log_id
 
@@ -133,7 +135,7 @@ def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
     # todo to variable
 
     num_scenes_to_unroll = 1
-    num_simulation_steps = 200
+    num_simulation_steps = 249
 
 
     if eval_type == "closed_loop":
@@ -180,7 +182,7 @@ def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
     return agg
 
 
-def train(model, train_dataset, eval_dataset, cfg, writer, model_name):
+def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
     # todo
     # cfg["train_params"]["max_num_steps"] = int(1e8)
 
@@ -217,6 +219,8 @@ def train(model, train_dataset, eval_dataset, cfg, writer, model_name):
         result_list = model(data)
         optimizer.zero_grad()
 
+        result_list=[result_list]
+
         for idx, result in enumerate(result_list):
             loss = result["loss"]
             writer.add_scalar(f'Loss/model_{idx}_train', loss.item(), n_iter)
@@ -237,7 +241,7 @@ def train(model, train_dataset, eval_dataset, cfg, writer, model_name):
 
             # save model
             # to_save = torch.jit.script(model.cpu())
-            dir_to_save = Path(project_path, "tmp", model_name)
+            dir_to_save = Path(project_path, "tmp"+str(date) , model_name)
             dir_to_save.mkdir(parents=True, exist_ok=True)
             path_to_save = Path(dir_to_save, f"iter_{n_iter:07}.pt")
             # to_save.save(path_to_save)
@@ -273,30 +277,99 @@ def load_config_data(path: str) -> dict:
     return cfg
 
 
+def evaluate_with_baseline():
+    # ===== INIT DATASET  FOR EVALUATE
+    dm = LocalDataManager(None)
+    eval_cfg = cfg["val_data_loader"]
+    eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
+
+    # MBOP
+    model_name = OFFLINE_RL_PLANNER
+
+    # model=load_model(model_name)
+    # model.load_state_dict(torch.load('/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmponly_policy/'
+    #                                  'Offline RL Planner-train_flag_0signal_scene_13-il_weight_1.0-pred_weight_1.0-1/iter_0268000.pt'))
+
+    num_ensemble = 4
+    model_list = [load_model(model_name) for _ in range(num_ensemble)]
+
+    model_path0 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmp0605/" \
+                  "Offline RL Planner-train_flag_0signal_scene_13-il_weight_1.0-pred_weight_1.0-1/iter_0005000.pt"
+    model_path1 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmp0604_2/" \
+                  "Offline RL Planner-train_flag_1signal_scene_13-il_weight_1.0-pred_weight_1.0-1/iter_0005000.pt"
+    model_path2 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmp0604_2/" \
+                  "Offline RL Planner-train_flag_2signal_scene_13-il_weight_1.0-pred_weight_1.0-1/iter_0005000.pt"
+    model_path3 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmp0604_2/" \
+                  "Offline RL Planner-train_flag_3signal_scene_13-il_weight_1.0-pred_weight_1.0-1/iter_0005000.pt"
+    model_list[0].load_state_dict(torch.load(model_path0))
+    model_list[1].load_state_dict(torch.load(model_path1))
+    model_list[2].load_state_dict(torch.load(model_path2))
+    model_list[3].load_state_dict(torch.load(model_path3))
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model = EnsembleOfflineRLModel(model_list)
+    model = model.to(device)
+
+
+    # baseline urban_driver
+    # model_path = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/examples/urban_driver/MS.pt"
+
+    # baseline urban_driver_without_BPTT
+    # model_path = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/examples/urban_driver/BPTT.pt"
+
+    # baseline open loop
+    # model_path = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/examples/urban_driver/OL.pt"
+
+    # baseline open loop with history
+    # model_path = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/examples/urban_driver/OL_HS.pt"
+
+    # model = torch.load(model_path)
+
+
+    model.eval()
+    torch.set_grad_enabled(False)
+
+    eval_results = evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="closed_loop")
+
+def train_process(train_flag,date,traffic_signal_scene_id,imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg):
+    log_name = {
+        "traffic_signal_scene_id": traffic_signal_scene_id if not None else "all",
+        "imitate_loss_weight": imitate_loss_weight,
+        "pred_loss_weight": pred_loss_weight,
+        "train_flag": train_flag,
+    }
+    logger, model_log_id = init_logger(model_name, log_name,date)
+
+    model = load_model(model_name)
+
+    train(model, train_dataset, eval_dataset, cfg, logger, date, model_name=model_log_id)
+
+
 if __name__ == '__main__':
     import argparse
     import os
 
     os.environ["_TEST_TUNE_TRIAL_UUID"] = "_"  # 在log路径不包含uuid, 这样可以是文件夹完全按照创建时间排序
 
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--imitate_loss_weight", type=float, default=1.0)
     parser.add_argument("--pred_loss_weight", type=float, default=1.0)
-    parser.add_argument("--cuda_id", type=int, default=0)
-    parser.add_argument("--flag", type=str)
+    parser.add_argument("--cuda_id", type=int, default=3)
+    parser.add_argument("--flag", type=str,default='debug')   #训练模式
 
     args = parser.parse_args()
 
-
-    args.cuda_id = 1
+    # args.cuda_id = 1
 
     gpu_avaliable_list = [str(args.cuda_id)]
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_avaliable_list)
 
     imitate_loss_weight = args.imitate_loss_weight
     pred_loss_weight = args.pred_loss_weight
+    flag = args.flag
 
-    cfg = load_config_data(str(Path(project_path, "scripts/offline_rl_config.yaml")))
+    cfg = load_config_data(str(Path(project_path, "scripts_/offline_rl_config.yaml")))
     cfg.update(vars(args))
     print(cfg)
 
@@ -307,38 +380,25 @@ if __name__ == '__main__':
     eval_dataset = train_dataset
     model_name = OFFLINE_RL_PLANNER
 
-    num_ensemble = 4
-
-    model_list = [load_model(model_name) for _ in range(num_ensemble)]
-
-    log_name = {
-        "traffic_signal_scene_id": traffic_signal_scene_id if not None else "all",
-        "imitate_loss_weight": imitate_loss_weight,
-        "pred_loss_weight": pred_loss_weight,
-    }
-    logger, model_log_id = init_logger(model_name, log_name)
-
-    # train(model_list[0], train_dataset, cfg, logger, model_name=model_log_id)
+    # num_ensemble = 4
+    # model_list = [load_model(model_name) for _ in range(num_ensemble)]
 
 
-    model = EnsembleOfflineRLModel(model_list)
-    train(model, train_dataset, eval_dataset, cfg, logger, model_name=model_log_id)
 
 
-    # ===== INIT DATASET
-    # eval_cfg = cfg["val_data_loader"]
-    # dm = LocalDataManager(None)
-    # eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
-    #
-    # evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="closed_loop")
 
-    # ===== INIT DATASET
-    # dm = LocalDataManager(None)
-    # eval_cfg = cfg["val_data_loader"]
-    # eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
-    # vectorizer = build_vectorizer(cfg, dm)
-    # eval_dataset = EgoDatasetVectorized(cfg, eval_zarr, vectorizer)
-    #
-    # infer_model = None
-    #
-    # evaluation(infer_model, eval_dataset, cfg, logger, model_name=model_log_id)
+    process = [Process(target=train_process, args=(0,flag,traffic_signal_scene_id,imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
+               Process(target=train_process, args=(1,flag,traffic_signal_scene_id,imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
+               Process(target=train_process, args=(2,flag,traffic_signal_scene_id,imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
+               Process(target=train_process, args=(3,flag,traffic_signal_scene_id,imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)), ]
+    [p.start() for p in process]  # 开启了两个进程
+    [p.join() for p in process]  # 等待两个进程依次结束
+
+
+
+    #评估网络模型
+    # evaluate_with_baseline()
+
+
+
+
