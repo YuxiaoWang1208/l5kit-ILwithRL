@@ -228,6 +228,8 @@ def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
             writer.add_scalar(f'Loss/model_{idx}_train_prediction_loss', result["loss_other_agent_pred"].item(), n_iter)
             writer.add_scalar(f'Loss/model_{idx}_train_reward_loss', result["loss_reward"].item(), n_iter)
             writer.add_scalar(f'Loss/model_{idx}_train_value_loss', result["loss_value"].item(), n_iter)
+            writer.add_scalar(f'Loss/model_{idx}_train_speed_loss', result["loss_speed"].item(), n_iter)
+
 
             loss.backward()
 
@@ -378,12 +380,13 @@ if __name__ == '__main__':
     traffic_signal_scene_id = 13
     train_dataset = load_dataset(cfg, traffic_signal_scene_id)
     eval_dataset = train_dataset
+
+
+
     model_name = OFFLINE_RL_PLANNER
 
     # num_ensemble = 4
     # model_list = [load_model(model_name) for _ in range(num_ensemble)]
-
-
 
 
 
