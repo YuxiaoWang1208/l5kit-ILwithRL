@@ -36,7 +36,8 @@ class EnsembleOfflineRLModel(nn.Module):
             results = [model(data) for model in self.models]
             return results
         else:
-            return self.mpc(data)
+            first_step, trajectory, one_step_planning, one_step_other_agents_prediction = self.mpc(data)
+            return first_step
 
             # #只考虑策略网络输出
             # first_step, _, trajectory_value = self.models[0].inference(data)
@@ -46,33 +47,57 @@ class EnsembleOfflineRLModel(nn.Module):
             # }
             # return eval_dict
 
-
-    def mpc(self, data):
-
+    def mpc(self, data, inference_steps=None):
         first_step_list = []
         trajectory_value_list = []
+        trajectory_planning_list = []
+
+        one_step_planning_list = []
+        one_step_other_agents_prediction_list = []
+
         for model in self.models:
-            first_step, _, trajectory_value = model.inference(data)
+            first_step, trajectory_planning, trajectory_value, one_step_planning, one_step_other_agents_prediction = \
+                model.inference(data, inference_steps)
+            # first_step, _, trajectory_value = model.inference(data)
             first_step_list.append(first_step)
             trajectory_value_list.append(trajectory_value)
+            trajectory_planning_list.append(trajectory_planning)
+            one_step_planning_list.append(one_step_planning)
+            one_step_other_agents_prediction_list.append(one_step_other_agents_prediction)
 
         first_step = torch.stack(first_step_list, dim=0)
         trajectory_value = torch.stack(trajectory_value_list, dim=0)
+        trajectory_planning = torch.stack(trajectory_planning_list, dim=0)
+        one_step_planning = torch.stack(one_step_planning_list, dim=0)
+        one_step_other_agents_prediction = torch.stack(one_step_other_agents_prediction_list, dim=0)
 
         index = torch.argmax(trajectory_value, dim=0)
         final_first_step = torch.zeros_like(first_step_list[0])
+        final_trajectory_planning = torch.zeros_like(trajectory_planning_list[0])
+        final_one_step_planning = torch.zeros_like(one_step_planning_list[0])
+        final_one_step_other_agents_prediction = torch.zeros_like(one_step_other_agents_prediction_list[0])
 
         batch_size = len(index)
         for i in range(batch_size):
             final_first_step[i] = first_step[index[i], i, :, :]
+            final_trajectory_planning = trajectory_planning[index[i], i, :, :]
+            final_one_step_planning = one_step_planning[index[i], i, :, :]
+            final_one_step_other_agents_prediction = one_step_other_agents_prediction[index[i], i, :, :]
         # print(index, final_first_step)
 
-        eval_dict = {
+        first_step_output = {
             "positions": final_first_step[..., :2],
             "yaws": final_first_step[..., 2:3],
         }
+        final_trajectory_output = {
+            "positions": final_trajectory_planning[..., :2],
+            "yaws": final_trajectory_planning[..., 2:3],
+        }
 
-        return eval_dict
+        return first_step_output, final_trajectory_output, final_one_step_planning, final_one_step_other_agents_prediction
+
+    def plan_trajectory(self, data):
+        return data
 
 
 class VectorOfflineRLModel(VectorizedModel):
@@ -155,7 +180,10 @@ class VectorOfflineRLModel(VectorizedModel):
             self._d_global, 1, 1, dropout=self._global_head_dropout
         )
 
-    def inference(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def inference(self,
+                  data_batch: Dict[str, torch.Tensor],
+                  inference_step=None
+                  ) -> Dict[str, torch.Tensor]:
 
         # calculate rewards
         # distance_to_center = reward.get_distance_to_centroid_per_batch(data_batch)
@@ -167,7 +195,9 @@ class VectorOfflineRLModel(VectorizedModel):
         # trajectory_len = 12  # 往前预测12次
         # future_num_frames = data_batch["target_availabilities"].shape[1]
         history_num_frames = data_batch["history_availabilities"].shape[1] - 1
-        trajectory_len = self.cfg["train_data_loader"]["pred_len"]
+        if inference_step is None:
+            inference_step = self.cfg["train_data_loader"]["pred_len"]
+
         # batch_size = self.cfg["train_data_loader"]["batch_size"]
 
         batch_size = data_batch["history_availabilities"].shape[0]
@@ -210,10 +240,10 @@ class VectorOfflineRLModel(VectorizedModel):
         trajectory_point_dim = 3
         # avail_point_dim = agents_past_avail.shape[-1]
         num_agents = agents_past_avail.shape[1]
-        agents_polys_horizon = torch.zeros((batch_size, num_agents, history_num_frames + 1 + trajectory_len,
+        agents_polys_horizon = torch.zeros((batch_size, num_agents, history_num_frames + 1 + inference_step,
                                             trajectory_point_dim),
                                            device=device)
-        agents_avail_horizon = torch.ones((batch_size, num_agents, history_num_frames + 1 + trajectory_len),
+        agents_avail_horizon = torch.ones((batch_size, num_agents, history_num_frames + 1 + inference_step),
                                           device=device)
         # agents_avail = torch.zeros(batch_size, 1+num_agents, history_num_frames+1+trajectory_len, )
 
@@ -247,7 +277,7 @@ class VectorOfflineRLModel(VectorizedModel):
 
         trajectory_value = torch.zeros(batch_size, device=one.device)
 
-        for idx in range(trajectory_len):
+        for idx in range(inference_step):
             # ==== AGENTS ====
             # batch_size x (1 + M) x seq len x self._vector_length
             # agents_polys = torch.cat(
@@ -360,6 +390,8 @@ class VectorOfflineRLModel(VectorizedModel):
             # # 只取前4个点，作为下一个状态
             if idx == 0:
                 first_step = outputs[:, :1, :]  # 轨迹中的第一步
+                one_step_planning = outputs.clone()
+                one_step_other_agents_prediction = all_other_agent_prediction.clone()
 
             # ==== UPDATE REWARD
             # batch_bind_ = {
@@ -382,10 +414,11 @@ class VectorOfflineRLModel(VectorizedModel):
             trajectory_value += reward_outputs
 
             # todo 好像应该输出下一步状态值
-            if idx == trajectory_len - 1:
+            if idx == inference_step - 1:
                 trajectory_value += value_outputs
 
-        return first_step, agents_polys_horizon, trajectory_value
+
+        return first_step, agents_polys_horizon, trajectory_value, one_step_planning, one_step_other_agents_prediction
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # ==== get additional info from the batch, or fall back to sensible defaults
