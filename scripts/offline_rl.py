@@ -26,6 +26,7 @@ from torch import nn
 from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from l5kit.kinematic import Perturbation
 from tqdm import tqdm
 
 project_path = str(Path(__file__).parents[1])
@@ -48,9 +49,8 @@ def load_dataset(cfg, traffic_signal_scene_id=None):
     # ===== INIT DATASET
     # cfg["train_data_loader"]["key"] = "train.zarr"
     train_zarr = ChunkedDataset(dm.require(cfg["train_data_loader"]["key"])).open()
-
     vectorizer = build_vectorizer(cfg, dm)
-    train_dataset = EgoDatasetVectorized(cfg, train_zarr, vectorizer)
+    train_dataset = EgoDatasetVectorized(cfg, train_zarr, vectorizer,perturbation=Perturbation)
 
     # todo demo for single scene
     if traffic_signal_scene_id:
@@ -228,9 +228,9 @@ def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
             writer.add_scalar(f'Loss/model_{idx}_train', loss.item(), n_iter)
             writer.add_scalar(f'Loss/model_{idx}_train_policy_loss', result["loss_imitate"].item(), n_iter)
             writer.add_scalar(f'Loss/model_{idx}_train_prediction_loss', result["loss_other_agent_pred"].item(), n_iter)
-            writer.add_scalar(f'Loss/model_{idx}_train_reward_loss', result["loss_reward"].item(), n_iter)
-            writer.add_scalar(f'Loss/model_{idx}_train_value_loss', result["loss_value"].item(), n_iter)
-            writer.add_scalar(f'Loss/model_{idx}_train_speed_loss', result["loss_speed"].item(), n_iter)
+            # writer.add_scalar(f'Loss/model_{idx}_train_reward_loss', result["loss_reward"].item(), n_iter)
+            # writer.add_scalar(f'Loss/model_{idx}_train_value_loss', result["loss_value"].item(), n_iter)
+            # writer.add_scalar(f'Loss/model_{idx}_train_speed_loss', result["loss_speed"].item(), n_iter)
 
             loss.backward()
 

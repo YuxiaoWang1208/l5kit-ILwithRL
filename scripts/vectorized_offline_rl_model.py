@@ -651,10 +651,11 @@ class VectorOfflineRLModel(VectorizedModel):
             loss_imitate = torch.mean(self.criterion(outputs, targets) * target_weights)
             loss_other_agent_pred = torch.mean(
                 self.criterion(all_other_agent_prediction, all_other_agents_targets) * all_other_agents_targets_weights)
-            loss_reward = torch.mean(self.criterion(target_reward, reward_outputs))
-            loss_value = torch.mean(self.criterion(truncated_value, value_outputs))
+            # loss_reward = torch.mean(self.criterion(target_reward, reward_outputs))
+            # loss_value = torch.mean(self.criterion(truncated_value, value_outputs))
 
-            loss_speed = torch.mean(self.criterion(data_batch['speed'], speed_outputs))
+            # loss_speed = torch.mean(self.criterion(data_batch['speed'], speed_outputs))
+
 
             # from l5kit.geometry.transform import transform_points
             # transform_points(all_other_agents_targets[0], data_batch["agent_from_world"][0])
@@ -675,11 +676,12 @@ class VectorOfflineRLModel(VectorizedModel):
             # data_batch,data_batch["all_other_agents_history_positions"][0], data_batch['other_agents_polyline'][0],data_batch['all_other_agents_future_positions'][0],data_batch['target_positions'][0], data_batch['agent_trajectory_polyline'][0],data_batch['agent_from_world']
 
             loss = self.cfg['imitate_loss_weight'] * loss_imitate + self.cfg[
-                'pred_loss_weight'] * loss_other_agent_pred+ loss_reward + loss_value * 0.02 + loss_speed
+                'pred_loss_weight'] * loss_other_agent_pred
+            #+ loss_reward + loss_value * 0.02 + loss_speed
 
-
-            train_dict = {"loss": loss, "loss_imitate": loss_imitate, "loss_other_agent_pred": loss_other_agent_pred,
-                          "loss_reward": loss_reward, "loss_value": loss_value, "loss_speed": loss_speed}
+            train_dict = {"loss": loss, "loss_imitate": loss_imitate, "loss_other_agent_pred": loss_other_agent_pred
+                          }
+            # "loss_reward": loss_reward, "loss_value": loss_value, "loss_speed": loss_speed
 
             return train_dict
         else:
