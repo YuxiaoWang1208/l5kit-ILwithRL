@@ -36,7 +36,7 @@ class EnsembleOfflineRLModel(nn.Module):
             results = [model(data) for model in self.models]
             return results
         else:
-            first_step, trajectory, one_step_planning, one_step_other_agents_prediction = self.mpc(data)
+            first_step, trajectory, one_step_planning, one_step_other_agents_prediction, _ = self.mpc(data)
             return first_step
 
             # #只考虑策略网络输出
@@ -93,8 +93,12 @@ class EnsembleOfflineRLModel(nn.Module):
             "positions": final_trajectory_planning[..., :2],
             "yaws": final_trajectory_planning[..., 2:3],
         }
+        all_trajectory_and_value = {
+            "trajectory": trajectory_planning,
+            "trajectory_value": trajectory_value,
+        }
 
-        return first_step_output, final_trajectory_output, final_one_step_planning, final_one_step_other_agents_prediction
+        return first_step_output, final_trajectory_output, final_one_step_planning, final_one_step_other_agents_prediction, all_trajectory_and_value
 
     def plan_trajectory(self, data):
         return data
