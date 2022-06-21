@@ -26,7 +26,7 @@ from torch import nn
 from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
-from l5kit.kinematic import Perturbation
+from l5kit.kinematic import Perturbation,fit_ackerman_model_approximate,AckermanPerturbation
 from tqdm import tqdm
 
 project_path = str(Path(__file__).parents[1])
@@ -50,7 +50,7 @@ def load_dataset(cfg, traffic_signal_scene_id=None):
     # cfg["train_data_loader"]["key"] = "train.zarr"
     train_zarr = ChunkedDataset(dm.require(cfg["train_data_loader"]["key"])).open()
     vectorizer = build_vectorizer(cfg, dm)
-    train_dataset = EgoDatasetVectorized(cfg, train_zarr, vectorizer,perturbation=Perturbation)
+    train_dataset = EgoDatasetVectorized(cfg, train_zarr, vectorizer,perturbation=AckermanPerturbation)
 
     # todo demo for single scene
     if traffic_signal_scene_id:
