@@ -14,12 +14,20 @@ from torch import nn
 
 
 import scripts.reward as reward
+from l5kit.planning.vectorized.common import build_target_normalization
+
+from l5kit.planning.vectorized.global_graph import VectorizedEmbedding
+from l5kit.planning.vectorized.local_graph import SinusoidalPositionalEmbedding
+
+
+from l5kit.planning.vectorized.local_graph import LocalSubGraph
 from scripts.reward import AGENT_EXTENT
 from scripts.reward import AGENT_TRAJECTORY_POLYLINE
 from scripts.reward import AGENT_YAWS
 from scripts.reward import OTHER_AGENTS_EXTENTS
 from scripts.reward import OTHER_AGENTS_POLYLINE
 from scripts.reward import OTHER_AGENTS_YAWS
+
 
 
 # from .local_graph import LocalSubGraph, SinusoidalPositionalEmbedding
@@ -36,8 +44,11 @@ class EnsembleOfflineRLModel(nn.Module):
             results = [model(data) for model in self.models]
             return results
         else:
-            first_step, trajectory, one_step_planning, one_step_other_agents_prediction = self.mpc(data)
+            first_step, trajectory, one_step_planning, one_step_other_agents_prediction, _ = self.mpc(data)
             return first_step
+
+            # results = self.models[0](data)
+            # return results
 
             # #只考虑策略网络输出
             # first_step, _, trajectory_value = self.models[0].inference(data)
@@ -93,8 +104,12 @@ class EnsembleOfflineRLModel(nn.Module):
             "positions": final_trajectory_planning[..., :2],
             "yaws": final_trajectory_planning[..., 2:3],
         }
+        all_trajectory_and_value = {
+            "trajectory": trajectory_planning,
+            "trajectory_value": trajectory_value,
+        }
 
-        return first_step_output, final_trajectory_output, final_one_step_planning, final_one_step_other_agents_prediction
+        return first_step_output, final_trajectory_output, final_one_step_planning, final_one_step_other_agents_prediction, all_trajectory_and_value
 
     def plan_trajectory(self, data):
         return data
@@ -144,6 +159,48 @@ class VectorOfflineRLModel(VectorizedModel):
             disable_map,
             disable_lane_boundaries,
         )
+
+
+
+        self._d_local = 128
+        self._d_global = 256
+
+        self._agent_features = ["start_x", "start_y", "yaw"]
+        self._lane_features = ["start_x", "start_y", "tl_feature"]
+        self._vector_agent_length = len(self._agent_features)
+        self._vector_lane_length = len(self._lane_features)
+        self._subgraph_layers = 3
+
+        self.register_buffer("weights_scaling", torch.as_tensor(weights_scaling))
+        self.criterion = criterion
+
+        self.normalize_targets = True
+        num_outputs = len(weights_scaling)
+        num_timesteps = num_targets // num_outputs
+
+        if self.normalize_targets:
+            scale = build_target_normalization(num_timesteps)
+            self.register_buffer("xy_scale", scale)
+
+        # normalization buffers
+        self.register_buffer("agent_std", torch.tensor([1.6919, 0.0365, 0.0218]))
+        self.register_buffer("other_agent_std", torch.tensor([33.2631, 21.3976, 1.5490]))
+
+        self.input_embed = nn.Linear(self._vector_agent_length, self._d_local)
+        self.positional_embedding = SinusoidalPositionalEmbedding(self._d_local)
+        self.type_embedding = VectorizedEmbedding(self._d_global)
+
+        self.disable_pos_encode = False
+
+        self.local_subgraph = LocalSubGraph(num_layers=self._subgraph_layers, dim_in=self._d_local)
+
+        if self._d_global != self._d_local:
+            self.global_from_local = nn.Linear(self._d_local, self._d_global)
+
+        self.global_head = MultiheadAttentionGlobalHead(
+            self._d_global, num_timesteps, num_outputs, dropout=self._global_head_dropout
+        )
+
 
         self.cfg = cfg
         num_outputs = len(weights_scaling)
@@ -626,6 +683,7 @@ class VectorOfflineRLModel(VectorizedModel):
 
             return train_dict
         else:
+            # print("inference!!!")
             pred_positions, pred_yaws = outputs[..., :2], outputs[..., 2:3]
             if self.normalize_targets:
                 pred_positions *= self.xy_scale
