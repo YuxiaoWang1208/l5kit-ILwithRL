@@ -1,30 +1,32 @@
 import os
 import sys
+from multiprocessing import Process
 from pathlib import Path
 
-import numpy as np
 import torch
 import yaml
+from l5kit.cle.closed_loop_evaluator import ClosedLoopEvaluator
+from l5kit.cle.closed_loop_evaluator import EvaluationPlan
+from l5kit.cle.metrics import CollisionFrontMetric
+from l5kit.cle.metrics import CollisionRearMetric
+from l5kit.cle.metrics import CollisionSideMetric
+from l5kit.cle.metrics import DisplacementErrorL2Metric
+from l5kit.cle.metrics import DistanceToRefTrajectoryMetric
+from l5kit.cle.validators import RangeValidator
+from l5kit.cle.validators import ValidationCountingAggregator
 from l5kit.data import ChunkedDataset
 from l5kit.data import LocalDataManager
 from l5kit.dataset import EgoDatasetVectorized
 from l5kit.planning.vectorized.closed_loop_model import VectorizedUnrollModel
 from l5kit.planning.vectorized.open_loop_model import VectorizedModel
+from l5kit.simulation.dataset import SimulationConfig
+from l5kit.simulation.unroll import ClosedLoopSimulator
 from l5kit.vectorization.vectorizer_builder import build_vectorizer
 from torch import nn
 from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-
-from l5kit.cle.closed_loop_evaluator import ClosedLoopEvaluator, EvaluationPlan
-from l5kit.cle.metrics import (CollisionFrontMetric, CollisionRearMetric, CollisionSideMetric,
-                               DisplacementErrorL2Metric, DistanceToRefTrajectoryMetric)
-from l5kit.cle.validators import RangeValidator, ValidationCountingAggregator
-
-from l5kit.simulation.dataset import SimulationConfig
-from l5kit.simulation.unroll import ClosedLoopSimulator
-from multiprocessing import Process
 
 project_path = str(Path(__file__).parents[1])
 print("project path: ", project_path)
@@ -110,18 +112,19 @@ def load_model(model_name):
     return model
 
 
-def init_logger(model_name, log_name,date):
+def init_logger(model_name, log_name, date):
     # tensorboard for log
     log_id = (
         f"train_flag_{log_name['train_flag']}"
         f"signal_scene_{log_name['traffic_signal_scene_id']}"
         f"-il_weight_{log_name['imitate_loss_weight']}"
         f"-pred_weight_{log_name['pred_loss_weight']}"
+        f"-pretrained_{log_name['is_pretrained']}"
         f"-1"
     )
     model_log_id = f"{model_name}-{log_id}"
 
-    log_dir = Path(project_path, "logs"+str(date))
+    log_dir = Path(project_path, "logs" + str(date))
     writer = SummaryWriter(log_dir=f"{log_dir}/{model_log_id}")
     return writer, model_log_id
 
@@ -136,7 +139,6 @@ def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
 
     num_scenes_to_unroll = 1
     num_simulation_steps = 249
-
 
     if eval_type == "closed_loop":
         # ==== DEFINE CLOSED-LOOP SIMULATION
@@ -219,7 +221,7 @@ def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
         result_list = model(data)
         optimizer.zero_grad()
 
-        result_list=[result_list]
+        result_list = [result_list]
 
         for idx, result in enumerate(result_list):
             loss = result["loss"]
@@ -230,7 +232,6 @@ def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
             writer.add_scalar(f'Loss/model_{idx}_train_value_loss', result["loss_value"].item(), n_iter)
             writer.add_scalar(f'Loss/model_{idx}_train_speed_loss', result["loss_speed"].item(), n_iter)
 
-
             loss.backward()
 
         # Backward pass
@@ -240,10 +241,9 @@ def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
         # progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
 
         if n_iter % cfg["train_params"]["checkpoint_every_n_steps"] == 0:
-
             # save model
             # to_save = torch.jit.script(model.cpu())
-            dir_to_save = Path(project_path, "tmp"+str(date) , model_name)
+            dir_to_save = Path(project_path, "tmp" + str(date), model_name)
             dir_to_save.mkdir(parents=True, exist_ok=True)
             path_to_save = Path(dir_to_save, f"iter_{n_iter:07}.pt")
             # to_save.save(path_to_save)
@@ -264,8 +264,6 @@ def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
 
             model.train()
             torch.set_grad_enabled(True)
-
-
 
 
 def load_config_data(path: str) -> dict:
@@ -312,7 +310,6 @@ def evaluate_with_baseline():
     model = EnsembleOfflineRLModel(model_list)
     model = model.to(device)
 
-
     # baseline urban_driver
     # model_path = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/examples/urban_driver/MS.pt"
 
@@ -327,22 +324,44 @@ def evaluate_with_baseline():
 
     # model = torch.load(model_path)
 
-
     model.eval()
     torch.set_grad_enabled(False)
 
     eval_results = evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="closed_loop")
 
-def train_process(train_flag,date,traffic_signal_scene_id,imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg):
+
+def train_process(train_flag, date, traffic_signal_scene_id, imitate_loss_weight, pred_loss_weight, model_name,
+                  train_dataset, eval_dataset, cfg):
     log_name = {
         "traffic_signal_scene_id": traffic_signal_scene_id if not None else "all",
         "imitate_loss_weight": imitate_loss_weight,
         "pred_loss_weight": pred_loss_weight,
         "train_flag": train_flag,
+        "is_pretrained": not cfg["no_pretrained"],
     }
-    logger, model_log_id = init_logger(model_name, log_name,date)
+    logger, model_log_id = init_logger(model_name, log_name, date)
 
     model = load_model(model_name)
+
+    pretrained_model_dir = "/mnt/share_disk/user/daixingyuan/l5kit/pretrained_model"
+    pretrained_model_name = "OL_HS"
+    pretrained_model_path = os.path.join(pretrained_model_dir, pretrained_model_name + ".pt")
+
+    pretrained_model = torch.load(pretrained_model_path)
+
+    if not cfg["no_pretrained"]:
+        # assign the pretrained model to the current model
+        # model.load_state_dict(pretrained_model)
+        pretrained_model_state_dict = pretrained_model.state_dict()
+        model.load_state_dict(pretrained_model_state_dict, strict=False)
+
+        # fix parameters of the model
+        # unfixed last two layer of policy net
+        unfixed_paras = ["global_head.output_embed.layers.1.weight", 'global_head.output_embed.layers.2.weight',
+                         "global_head.output_embed.layers.1.bias", "global_head.output_embed.layers.2.bias"]
+        for name, param in model.named_parameters():
+            if name in pretrained_model_state_dict and name not in unfixed_paras:
+                param.requires_grad = False
 
     train(model, train_dataset, eval_dataset, cfg, logger, date, model_name=model_log_id)
 
@@ -353,12 +372,13 @@ if __name__ == '__main__':
 
     os.environ["_TEST_TUNE_TRIAL_UUID"] = "_"  # 在log路径不包含uuid, 这样可以是文件夹完全按照创建时间排序
 
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--imitate_loss_weight", type=float, default=1.0)
     parser.add_argument("--pred_loss_weight", type=float, default=1.0)
     parser.add_argument("--cuda_id", type=int, default=3)
-    parser.add_argument("--flag", type=str,default='debug')   #训练模式
+    parser.add_argument("--flag", type=str, default='debug')  # 训练模式
+    parser.add_argument("--flag_for_kill", type=str, default='ps_and_kill')  # 训练模式
+    parser.add_argument("--no_pretrained", action="store_true")
 
     args = parser.parse_args()
 
@@ -381,14 +401,10 @@ if __name__ == '__main__':
     train_dataset = load_dataset(cfg, traffic_signal_scene_id)
     eval_dataset = train_dataset
 
-
-
     model_name = OFFLINE_RL_PLANNER
 
     # num_ensemble = 4
     # model_list = [load_model(model_name) for _ in range(num_ensemble)]
-
-
 
     process = [Process(target=train_process, args=(0,flag,traffic_signal_scene_id,imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
                Process(target=train_process, args=(1,flag,traffic_signal_scene_id,imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
@@ -397,11 +413,5 @@ if __name__ == '__main__':
     [p.start() for p in process]  # 开启了两个进程
     [p.join() for p in process]  # 等待两个进程依次结束
 
-
-
-    #评估网络模型
+    # 评估网络模型
     # evaluate_with_baseline()
-
-
-
-

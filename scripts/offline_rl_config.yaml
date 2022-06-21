@@ -132,6 +132,6 @@ data_generation_params:
 ###################
 ## Train params
 train_params:
-  checkpoint_every_n_steps: 1000
+  checkpoint_every_n_steps: 100
   max_num_steps:  1.0e+8 # 1e8
-  eval_every_n_steps: 1000
+  eval_every_n_steps: 100
