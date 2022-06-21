@@ -424,10 +424,10 @@ if __name__ == '__main__':
     # num_ensemble = 4
     # model_list = [load_model(model_name) for _ in range(num_ensemble)]
 
-    process = [Process(target=train_process, args=(0,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),]
-               # Process(target=train_process, args=(1,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
-               # Process(target=train_process, args=(2,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
-               # Process(target=train_process, args=(3,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)), ]
+    process = [Process(target=train_process, args=(0,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
+               Process(target=train_process, args=(1,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
+               Process(target=train_process, args=(2,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
+               Process(target=train_process, args=(3,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)), ]
     [p.start() for p in process]  # 开启了两个进程
     [p.join() for p in process]  # 等待两个进程依次结束
 
