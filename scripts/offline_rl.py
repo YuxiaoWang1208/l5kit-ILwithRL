@@ -8,6 +8,7 @@ import yaml
 from l5kit.cle.closed_loop_evaluator import ClosedLoopEvaluator
 from l5kit.cle.closed_loop_evaluator import EvaluationPlan
 from l5kit.cle.metrics import CollisionFrontMetric
+from l5kit.geometry import  angular_distance
 from l5kit.cle.metrics import CollisionRearMetric
 from l5kit.cle.metrics import CollisionSideMetric
 from l5kit.cle.metrics import DisplacementErrorL2Metric
@@ -321,9 +322,17 @@ def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
             torch.save(model.state_dict(), path_to_save)
             print(f"MODEL STORED at {path_to_save}")
 
-        if n_iter % cfg["train_params"]["eval_every_n_steps"] == 0:
-            # evaluation(model, eval_type="close_loop")
+        if n_iter % cfg["train_params"]["eval_every_n_steps"] ==0:
             model.eval()
+            #开环评估
+            open_loop_results = evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="open_loop")
+            # print(open_loop_results)
+
+            writer.add_scalar(f'Eval/ade', open_loop_results["ade"].item(), n_iter)
+            writer.add_scalar(f'Eval/fde', open_loop_results["fde"].item(), n_iter)
+            writer.add_scalar(f'Eval/angle_dis', open_loop_results["angle_dis"].item(), n_iter)
+
+            #闭环评估   evaluation(model, eval_type="close_loop")
             eval_results = evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="closed_loop")
 
             writer.add_scalar(f'Eval/displacement_error_l2', eval_results["displacement_error_l2"].item(), n_iter)
@@ -334,6 +343,7 @@ def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
 
             model.train()
             torch.set_grad_enabled(True)
+
 
 
 def load_config_data(path: str) -> dict:
