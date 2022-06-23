@@ -195,8 +195,62 @@ def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
         cle_evaluator.reset()
 
         print(agg)
+        return agg
 
-    return agg
+    # 开环评估
+    if eval_type == "open_loop":
+        train_cfg = cfg["train_data_loader"]
+        eval_dataloader = DataLoader(eval_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
+                                     num_workers=train_cfg["num_workers"])
+
+        # training loops
+        tr_it = iter(eval_dataloader)
+
+        # prepare for training
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        model = model.to(device)
+        model.eval()
+        torch.set_grad_enabled(True)
+        position_preds = []
+        yaw_preds = []
+        position_gts = []
+        yaw_gts = []
+        torch.set_grad_enabled(False)
+        for idx_data, data in enumerate(tqdm(eval_dataloader)):
+            # Forward pass
+            data = {k: v.to(device) for k, v in data.items()}
+            eval_dict = model(data)
+
+            position_preds.append(eval_dict["positions"].detach().cpu().numpy())
+            yaw_preds.append(eval_dict["yaws"].detach().cpu().numpy())
+
+            position_gts.append(data["target_positions"].detach().cpu().numpy())
+            yaw_gts.append(data["target_yaws"].detach().cpu().numpy())
+        position_preds = np.concatenate(position_preds)
+        yaw_preds = np.concatenate(yaw_preds)
+
+        position_gts = np.concatenate(position_gts)
+        yaw_gts = np.concatenate(yaw_gts)
+
+        pos_errors = np.linalg.norm(position_preds - position_gts, axis=-1)
+        angle_errors = angular_distance(yaw_preds, yaw_gts).squeeze()
+
+        # ADE HIST
+        ade = pos_errors.mean(-1).mean()
+
+        # FDE HIST
+        fde = pos_errors[:, -1].mean()
+
+        # ANGLE DISTANCE
+        angle_dis = angle_errors.mean(-1).mean()
+
+        results = {}
+        results['ade'] = ade
+        results['fde'] = fde
+        results['angle_dis'] = angle_dis
+
+        return results
+
 
 
 def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
