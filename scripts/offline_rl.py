@@ -246,6 +246,7 @@ def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
             writer.add_scalar(f'Loss/model_{idx}_train_reward_loss', result["loss_reward"].item(), n_iter)
             writer.add_scalar(f'Loss/model_{idx}_train_value_loss', result["loss_value"].item(), n_iter)
             writer.add_scalar(f'Loss/model_{idx}_train_speed_loss', result["loss_speed"].item(), n_iter)
+            writer.add_scalar(f'Loss/model_{idx}_train_tl_loss', result["loss_tl"].item(), n_iter)
 
             loss.backward()
 

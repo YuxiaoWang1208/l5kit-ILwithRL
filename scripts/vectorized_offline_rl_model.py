@@ -237,6 +237,9 @@ class VectorOfflineRLModel(VectorizedModel):
             self._d_global, 1, 1, dropout=self._global_head_dropout
         )
 
+        self.traffic_light_head = MultiheadAttentionGlobalHead(
+            self._d_global, num_other_agent, 20, dropout = self._global_head_dropout)
+
     def inference(self,
                   data_batch: Dict[str, torch.Tensor],
                   inference_step=None
@@ -360,7 +363,7 @@ class VectorOfflineRLModel(VectorizedModel):
             type_embedding = self.type_embedding(data_batch).transpose(0, 1)
 
             # call the model with these features
-            outputs, attns, all_other_agent_prediction, reward_outputs, value_outputs, speed_outputs= self.model_call(
+            outputs, attns, all_other_agent_prediction, reward_outputs, value_outputs, speed_outputs,tl_outputs= self.model_call(
                 agents_polys_step,
                 static_polys_step,
                 agents_avail_step,
@@ -481,6 +484,10 @@ class VectorOfflineRLModel(VectorizedModel):
         # ==== get additional info from the batch, or fall back to sensible defaults
         future_num_frames = data_batch["target_availabilities"].shape[1]
         history_num_frames = data_batch["history_availabilities"].shape[1] - 1
+
+        # 获取交通信号灯相关信息
+        tl_feature=data_batch['lanes_mid'][:,:,:,-1]
+        tl_feature*=data_batch['lanes_mid_availabilities']
 
         # ==== Past  info ====
         agents_past_polys = torch.cat(
@@ -615,7 +622,7 @@ class VectorOfflineRLModel(VectorizedModel):
         lane_bdry_len = data_batch["lanes"].shape[1]
 
         # call the model with these features
-        outputs, attns, all_other_agent_prediction , reward_outputs, value_outputs, speed_outputs= self.model_call(
+        outputs, attns, all_other_agent_prediction , reward_outputs, value_outputs, speed_outputs,tl_outputs= self.model_call(
             agents_polys,
             static_polys,
             agents_availabilities,
@@ -653,8 +660,8 @@ class VectorOfflineRLModel(VectorizedModel):
                 self.criterion(all_other_agent_prediction, all_other_agents_targets) * all_other_agents_targets_weights)
             loss_reward = torch.mean(self.criterion(target_reward, reward_outputs))
             loss_value = torch.mean(self.criterion(truncated_value, value_outputs))
-
             loss_speed = torch.mean(self.criterion(data_batch['speed'], speed_outputs))
+            loss_tl=torch.mean(self.criterion(tl_feature, tl_outputs))
 
 
             # from l5kit.geometry.transform import transform_points
@@ -676,11 +683,11 @@ class VectorOfflineRLModel(VectorizedModel):
             # data_batch,data_batch["all_other_agents_history_positions"][0], data_batch['other_agents_polyline'][0],data_batch['all_other_agents_future_positions'][0],data_batch['target_positions'][0], data_batch['agent_trajectory_polyline'][0],data_batch['agent_from_world']
 
             loss = self.cfg['imitate_loss_weight'] * loss_imitate + self.cfg[
-                'pred_loss_weight'] * loss_other_agent_pred+ loss_reward + loss_value * 0.02 + loss_speed
+                'pred_loss_weight'] * loss_other_agent_pred+ loss_reward + loss_value * 0.02 + loss_speed+ loss_tl
 
 
             train_dict = {"loss": loss, "loss_imitate": loss_imitate, "loss_other_agent_pred": loss_other_agent_pred,
-                          "loss_reward": loss_reward, "loss_value": loss_value, "loss_speed": loss_speed}
+                          "loss_reward": loss_reward, "loss_value": loss_value, "loss_speed": loss_speed, "loss_tl":loss_tl}
 
             return train_dict
         else:
@@ -770,7 +777,9 @@ class VectorOfflineRLModel(VectorizedModel):
 
         speed_outputs, _ =self.speed_head(all_embs, type_embedding, invalid_polys)
 
-        return outputs, attns, all_other_agent_prediction ,reward_outputs.view(-1), value_outputs.view(-1), speed_outputs.view(-1)
+        tl_outputs, _ = self.traffic_light_head(all_embs, type_embedding, invalid_polys)
+
+        return outputs, attns, all_other_agent_prediction ,reward_outputs.view(-1), value_outputs.view(-1), speed_outputs.view(-1), tl_outputs
 
     # refer to closed_loop_model
     def update_transformation_matrices(self, pred_xy_step_unnorm: torch.Tensor, pred_yaw_step: torch.Tensor,
