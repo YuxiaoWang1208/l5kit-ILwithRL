@@ -13,7 +13,7 @@ from l5kit.planning.vectorized.open_loop_model import VectorizedModel
 from torch import nn
 
 
-import scripts.reward as reward
+import reward as reward
 from l5kit.planning.vectorized.common import build_target_normalization
 
 from l5kit.planning.vectorized.global_graph import VectorizedEmbedding
@@ -21,12 +21,12 @@ from l5kit.planning.vectorized.local_graph import SinusoidalPositionalEmbedding
 
 
 from l5kit.planning.vectorized.local_graph import LocalSubGraph
-from scripts.reward import AGENT_EXTENT
-from scripts.reward import AGENT_TRAJECTORY_POLYLINE
-from scripts.reward import AGENT_YAWS
-from scripts.reward import OTHER_AGENTS_EXTENTS
-from scripts.reward import OTHER_AGENTS_POLYLINE
-from scripts.reward import OTHER_AGENTS_YAWS
+from reward import AGENT_EXTENT
+from reward import AGENT_TRAJECTORY_POLYLINE
+from reward import AGENT_YAWS
+from reward import OTHER_AGENTS_EXTENTS
+from reward import OTHER_AGENTS_POLYLINE
+from reward import OTHER_AGENTS_YAWS
 
 
 
