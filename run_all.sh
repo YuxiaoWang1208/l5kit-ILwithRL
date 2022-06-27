@@ -16,3 +16,4 @@ FLAG_FOR_KILL=2114
 python scripts/offline_rl.py --imitate_loss_weight 1 --pred_loss_weight 1 --cuda_id 0 --flag $FLAG1 --start_scene 13 --end_scene 14 --flag_for_kill $FLAG_FOR_KILL &
 #python scripts/offline_rl.py --imitate_loss_weight 1 --pred_loss_weight 1 --cuda_id 2 --no_pretrained --start_scene 0 --end_scene 130 --flag $FLAG --flag_for_kill $FLAG_FOR_KILL &
 python scripts/offline_rl.py --imitate_loss_weight 1 --pred_loss_weight 1 --cuda_id 0 --flag $FLAG2 --start_scene 0 --end_scene 130 --flag_for_kill $FLAG_FOR_KILL &
+

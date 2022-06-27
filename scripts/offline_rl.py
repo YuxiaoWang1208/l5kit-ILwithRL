@@ -47,7 +47,7 @@ OPEN_LOOP_PLANNER = "Open Loop Planner"
 OFFLINE_RL_PLANNER = "Offline RL Planner"
 
 
-def load_dataset(cfg, traffic_signal_scene_id_list=None):
+def load_dataset(cfg, traffic_signal_scene_id_list=None,train=True):
     dm = LocalDataManager(None)
     # ===== INIT DATASET
     # cfg["train_data_loader"]["key"] = "train.zarr"
@@ -62,16 +62,24 @@ def load_dataset(cfg, traffic_signal_scene_id_list=None):
     data_list = []
     num_of_scenes = 0
     if len(traffic_signal_scene_id_list) > 1:
-        for scene_id in traffic_signal_scene_id_list:
-            scene_1 = train_dataset.get_scene_dataset(scene_id)
-            if len(scene_1.dataset.tl_faces) > 0:
-                data_list.append(scene_1)
-                num_of_scenes += 1  # 累计有多少个场景
-        train_dataset = ConcatDataset(data_list)
-        print('num_of_scenes:', num_of_scenes)
+        if train==True:
+            for scene_id in traffic_signal_scene_id_list:
+                scene_1 = train_dataset.get_scene_dataset(scene_id)
+                if len(scene_1.dataset.tl_faces) > 0:
+                    data_list.append(scene_1)
+                    num_of_scenes += 1  # 累计有多少个场景
+            train_dataset = ConcatDataset(data_list)
+            print('num_of_scenes:', num_of_scenes)
+        if train==False:
+            for scene_id in traffic_signal_scene_id_list:
+                scene_1 = train_dataset.get_scene_dataset(scene_id)
+                if len(scene_1.dataset.tl_faces) > 0:
+                    data_list.append(scene_1)
+                    num_of_scenes += 1  # 累计有多少个场景
+            print('num_of_scenes:', num_of_scenes)
+            return data_list
     if len(traffic_signal_scene_id_list) == 1:
         train_dataset = train_dataset.get_scene_dataset(traffic_signal_scene_id_list[0])
-    print(train_dataset)
     return train_dataset
 
 
@@ -145,7 +153,7 @@ def init_logger(model_name, log_name, date):
     return writer, model_log_id
 
 
-def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
+def evaluation(model, eval_dataset, cfg, eval_zarr,eval_type):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     model = model.eval()
@@ -154,19 +162,13 @@ def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
     # todo to variable
 
     num_scenes_to_unroll = 1
-    num_simulation_steps = 249
+    num_simulation_steps = 240
 
     if eval_type == "closed_loop":
         # ==== DEFINE CLOSED-LOOP SIMULATION
         sim_cfg = SimulationConfig(use_ego_gt=False, use_agents_gt=True, disable_new_agents=True,
                                    distance_th_far=500, distance_th_close=50, num_simulation_steps=num_simulation_steps,
                                    start_frame_index=0, show_info=True)
-
-        sim_loop = ClosedLoopSimulator(sim_cfg, eval_dataset, device, model_ego=model, model_agents=None)
-
-        # ==== UNROLL
-        scenes_to_unroll = list(range(0, len(eval_zarr.scenes), len(eval_zarr.scenes) // num_scenes_to_unroll))
-        sim_outs = sim_loop.unroll(scenes_to_unroll)
 
         metrics = [DisplacementErrorL2Metric(),
                    DistanceToRefTrajectoryMetric(),
@@ -186,69 +188,104 @@ def evaluation(model, eval_dataset, cfg, eval_zarr, eval_type):
                                    "collision_rear",
                                    "collision_side"]
 
-        cle_evaluator = ClosedLoopEvaluator(EvaluationPlan(metrics=metrics,
-                                                           validators=validators,
-                                                           composite_metrics=[],
-                                                           intervention_validators=intervention_validators))
-        cle_evaluator.evaluate(sim_outs)
-        validation_results = cle_evaluator.validation_results()
-        agg = ValidationCountingAggregator().aggregate(validation_results)
-        cle_evaluator.reset()
+        displacement_error_l2_list=[]
+        distance_ref_trajectory_list=[]
+        collision_front_list=[]
+        collision_rear_list=[]
+        collision_side_list=[]
 
-        print(agg)
+        for i in range(len(eval_dataset)):
+            data_set=eval_dataset[i]
+
+            sim_loop = ClosedLoopSimulator(sim_cfg, data_set, device, model_ego=model, model_agents=None)
+
+            # ==== UNROLL
+            # scenes_to_unroll = list(range(0, len(eval_zarr.scenes), len(eval_zarr.scenes) // num_scenes_to_unroll))
+            sim_outs = sim_loop.unroll([0])    #传进去的数据集只有一个场景，因此永远是零号
+
+
+
+            cle_evaluator = ClosedLoopEvaluator(EvaluationPlan(metrics=metrics,
+                                                               validators=validators,
+                                                               composite_metrics=[],
+                                                               intervention_validators=intervention_validators))
+            cle_evaluator.evaluate(sim_outs)
+            validation_results = cle_evaluator.validation_results()
+            agg = ValidationCountingAggregator().aggregate(validation_results)
+            cle_evaluator.reset()
+            displacement_error_l2_list.append(agg['displacement_error_l2'])
+            distance_ref_trajectory_list.append(agg['distance_ref_trajectory'])
+            collision_front_list.append(agg['collision_front'])
+            collision_rear_list.append(agg['collision_rear'])
+            collision_side_list.append(agg['collision_side'])
+
+        agg['displacement_error_l2']=np.mean(np.array(displacement_error_l2_list))
+        agg['distance_ref_trajectory']=np.mean(np.array(distance_ref_trajectory_list))
+        agg['collision_front']=np.mean(np.array(collision_front_list))
+        agg['collision_rear']=np.mean(np.array(collision_rear_list))
+        agg['collision_side']=np.mean(np.array(collision_side_list))
+
         return agg
 
     # 开环评估
     if eval_type == "open_loop":
         train_cfg = cfg["train_data_loader"]
-        eval_dataloader = DataLoader(eval_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
-                                     num_workers=train_cfg["num_workers"])
+        ade_list=[]
+        fde_list=[]
+        angle_dis_list=[]
+        for data_set in eval_dataset:
+            eval_dataloader = DataLoader(data_set, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
+                                         num_workers=train_cfg["num_workers"])
 
-        # training loops
-        tr_it = iter(eval_dataloader)
+            # training loops
+            tr_it = iter(eval_dataloader)
 
-        # prepare for training
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        model = model.to(device)
-        model.eval()
-        torch.set_grad_enabled(True)
-        position_preds = []
-        yaw_preds = []
-        position_gts = []
-        yaw_gts = []
-        torch.set_grad_enabled(False)
-        for idx_data, data in enumerate(tqdm(eval_dataloader)):
-            # Forward pass
-            data = {k: v.to(device) for k, v in data.items()}
-            eval_dict = model(data)
+            # prepare for training
+            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+            model = model.to(device)
+            model.eval()
+            torch.set_grad_enabled(True)
+            position_preds = []
+            yaw_preds = []
+            position_gts = []
+            yaw_gts = []
+            torch.set_grad_enabled(False)
+            for idx_data, data in enumerate(tqdm(eval_dataloader)):
+                # Forward pass
+                data = {k: v.to(device) for k, v in data.items()}
+                eval_dict = model(data)
 
-            position_preds.append(eval_dict["positions"].detach().cpu().numpy())
-            yaw_preds.append(eval_dict["yaws"].detach().cpu().numpy())
+                position_preds.append(eval_dict["positions"].detach().cpu().numpy())
+                yaw_preds.append(eval_dict["yaws"].detach().cpu().numpy())
 
-            position_gts.append(data["target_positions"].detach().cpu().numpy())
-            yaw_gts.append(data["target_yaws"].detach().cpu().numpy())
-        position_preds = np.concatenate(position_preds)
-        yaw_preds = np.concatenate(yaw_preds)
+                position_gts.append(data["target_positions"].detach().cpu().numpy())
+                yaw_gts.append(data["target_yaws"].detach().cpu().numpy())
+            position_preds = np.concatenate(position_preds)
+            yaw_preds = np.concatenate(yaw_preds)
 
-        position_gts = np.concatenate(position_gts)
-        yaw_gts = np.concatenate(yaw_gts)
+            position_gts = np.concatenate(position_gts)
+            yaw_gts = np.concatenate(yaw_gts)
 
-        pos_errors = np.linalg.norm(position_preds - position_gts, axis=-1)
-        angle_errors = angular_distance(yaw_preds, yaw_gts).squeeze()
+            pos_errors = np.linalg.norm(position_preds - position_gts, axis=-1)
+            angle_errors = angular_distance(yaw_preds, yaw_gts).squeeze()
 
-        # ADE HIST
-        ade = pos_errors.mean(-1).mean()
+            # ADE HIST
+            ade = pos_errors.mean(-1).mean()
 
-        # FDE HIST
-        fde = pos_errors[:, -1].mean()
+            # FDE HIST
+            fde = pos_errors[:, -1].mean()
 
-        # ANGLE DISTANCE
-        angle_dis = angle_errors.mean(-1).mean()
+            # ANGLE DISTANCE
+            angle_dis = angle_errors.mean(-1).mean()
+
+            ade_list.append(ade)
+            fde_list.append(fde)
+            angle_dis_list.append(angle_dis)
 
         results = {}
-        results['ade'] = ade
-        results['fde'] = fde
-        results['angle_dis'] = angle_dis
+        results['ade'] = np.mean(np.array(ade_list))
+        results['fde'] = np.mean(np.array(fde_list))
+        results['angle_dis'] = np.mean(np.array(angle_dis_list))
 
         return results
 
@@ -326,8 +363,6 @@ def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
             model.eval()
             #开环评估
             open_loop_results = evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="open_loop")
-            # print(open_loop_results)
-
             writer.add_scalar(f'Eval/ade', open_loop_results["ade"].item(), n_iter)
             writer.add_scalar(f'Eval/fde', open_loop_results["fde"].item(), n_iter)
             writer.add_scalar(f'Eval/angle_dis', open_loop_results["angle_dis"].item(), n_iter)
@@ -459,8 +494,8 @@ if __name__ == '__main__':
     parser.add_argument("--flag", type=str, default='debug')  # 训练模式
     parser.add_argument("--flag_for_kill", type=str, default='ps_and_kill')  # 训练模式
     parser.add_argument("--no_pretrained", action="store_true")
-    parser.add_argument("--start_scene",type=int, default=13)
-    parser.add_argument("--end_scene",type=int, default=14)
+    parser.add_argument("--start_scene",type=int, default=0)
+    parser.add_argument("--end_scene",type=int, default=130)
 
     args = parser.parse_args()
 
@@ -480,9 +515,9 @@ if __name__ == '__main__':
     # to test all traffic signal scenarios
     # traffic_signal_scene_id = None
     train_traffic_signal_scene_id_list=list(np.arange(args.start_scene,args.end_scene))
-    eval_traffic_signal_scene_id_list = [13]
-    train_dataset = load_dataset(cfg, train_traffic_signal_scene_id_list)
-    eval_dataset = load_dataset(cfg, eval_traffic_signal_scene_id_list)
+    eval_traffic_signal_scene_id_list = list(np.arange(0,20))
+    train_dataset= load_dataset(cfg, train_traffic_signal_scene_id_list,train=True)
+    eval_dataset = load_dataset(cfg, eval_traffic_signal_scene_id_list,train=False)   #测试数据集是一个列表，包含多个场景的测试数据
 
     model_name = OFFLINE_RL_PLANNER
 
