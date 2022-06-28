@@ -60,6 +60,7 @@ def load_dataset(cfg, traffic_signal_scene_id_list=None,train=True):
 
     # todo demo for single scene
     data_list = []
+    scene_id_list=[]
     num_of_scenes = 0
     if len(traffic_signal_scene_id_list) > 1:
         if train==True:
@@ -75,8 +76,10 @@ def load_dataset(cfg, traffic_signal_scene_id_list=None,train=True):
                 scene_1 = train_dataset.get_scene_dataset(scene_id)
                 if len(scene_1.dataset.tl_faces) > 0:
                     data_list.append(scene_1)
+                    scene_id_list.append(scene_id)
                     num_of_scenes += 1  # 累计有多少个场景
             print('num_of_scenes:', num_of_scenes)
+            print('scene_id_list:',scene_id_list)
             return data_list
     if len(traffic_signal_scene_id_list) == 1:
         train_dataset = train_dataset.get_scene_dataset(traffic_signal_scene_id_list[0])
