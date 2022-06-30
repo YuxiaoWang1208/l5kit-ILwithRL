@@ -53,10 +53,10 @@ def load_dataset(cfg, traffic_signal_scene_id_list=None,train=True):
     # cfg["train_data_loader"]["key"] = "train.zarr"
     train_zarr = ChunkedDataset(dm.require(cfg["train_data_loader"]["key"])).open()
     vectorizer = build_vectorizer(cfg, dm)
-    mean_value=np.array([0.0,0.0,0.0])
-    std_value=np.array([0.5,1.5,np.pi/6])
-    AckermanPerturbation1=AckermanPerturbation(random_offset_generator=GaussianRandomGenerator(mean=mean_value,std=std_value),perturb_prob=0.1)
-    train_dataset = EgoDatasetVectorized(cfg, train_zarr, vectorizer,perturbation=AckermanPerturbation1)
+    # mean_value=np.array([0.0,0.0,0.0])
+    # std_value=np.array([0.5,1.5,np.pi/6])
+    # AckermanPerturbation1=AckermanPerturbation(random_offset_generator=GaussianRandomGenerator(mean=mean_value,std=std_value),perturb_prob=0.1)
+    train_dataset = EgoDatasetVectorized(cfg, train_zarr, vectorizer)
 
     # todo demo for single scene
     data_list = []
@@ -83,7 +83,10 @@ def load_dataset(cfg, traffic_signal_scene_id_list=None,train=True):
             return data_list
     if len(traffic_signal_scene_id_list) == 1:
         train_dataset = train_dataset.get_scene_dataset(traffic_signal_scene_id_list[0])
-    return train_dataset
+        if train==True:
+            return train_dataset
+        else:
+            return [train_dataset]
 
 
 def load_model(model_name):
@@ -493,12 +496,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--imitate_loss_weight", type=float, default=1.0)
     parser.add_argument("--pred_loss_weight", type=float, default=1.0)
-    parser.add_argument("--cuda_id", type=int, default=3)
+    parser.add_argument("--cuda_id", type=int, default=1)
     parser.add_argument("--flag", type=str, default='debug')  # 训练模式
     parser.add_argument("--flag_for_kill", type=str, default='ps_and_kill')  # 训练模式
     parser.add_argument("--no_pretrained", action="store_true")
-    parser.add_argument("--start_scene",type=int, default=0)
-    parser.add_argument("--end_scene",type=int, default=130)
+    parser.add_argument("--start_scene",type=int, default=13)
+    parser.add_argument("--end_scene",type=int, default=14)
 
     args = parser.parse_args()
 
@@ -518,7 +521,7 @@ if __name__ == '__main__':
     # to test all traffic signal scenarios
     # traffic_signal_scene_id = None
     train_traffic_signal_scene_id_list=list(np.arange(args.start_scene,args.end_scene))
-    eval_traffic_signal_scene_id_list = list(np.arange(0,20))
+    eval_traffic_signal_scene_id_list = list(np.arange(13,14))
     train_dataset= load_dataset(cfg, train_traffic_signal_scene_id_list,train=True)
     eval_dataset = load_dataset(cfg, eval_traffic_signal_scene_id_list,train=False)   #测试数据集是一个列表，包含多个场景的测试数据
 
@@ -527,10 +530,10 @@ if __name__ == '__main__':
     # num_ensemble = 4
     # model_list = [load_model(model_name) for _ in range(num_ensemble)]
 
-    process = [Process(target=train_process, args=(0,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
-               Process(target=train_process, args=(1,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
-               Process(target=train_process, args=(2,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
-               Process(target=train_process, args=(3,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)), ]
+    process = [Process(target=train_process, args=(0,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),]
+               # Process(target=train_process, args=(1,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
+               # Process(target=train_process, args=(2,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)),
+               # Process(target=train_process, args=(3,flag,eval_traffic_signal_scene_id_list[0],imitate_loss_weight,pred_loss_weight,model_name,train_dataset,eval_dataset,cfg)), ]
     [p.start() for p in process]  # 开启了两个进程
     [p.join() for p in process]  # 等待两个进程依次结束
 
