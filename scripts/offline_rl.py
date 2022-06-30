@@ -53,10 +53,10 @@ def load_dataset(cfg, traffic_signal_scene_id_list=None,train=True):
     # cfg["train_data_loader"]["key"] = "train.zarr"
     train_zarr = ChunkedDataset(dm.require(cfg["train_data_loader"]["key"])).open()
     vectorizer = build_vectorizer(cfg, dm)
-    # mean_value=np.array([0.0,0.0,0.0])
-    # std_value=np.array([0.5,1.5,np.pi/6])
-    # AckermanPerturbation1=AckermanPerturbation(random_offset_generator=GaussianRandomGenerator(mean=mean_value,std=std_value),perturb_prob=0.1)
-    train_dataset = EgoDatasetVectorized(cfg, train_zarr, vectorizer)
+    mean_value=np.array([0.0,0.0,0.0])
+    std_value=np.array([0.5,1.5,np.pi/6])
+    AckermanPerturbation1=AckermanPerturbation(random_offset_generator=GaussianRandomGenerator(mean=mean_value,std=std_value),perturb_prob=0.1)
+    train_dataset = EgoDatasetVectorized(cfg, train_zarr, vectorizer,perturbation=AckermanPerturbation1)
 
     # todo demo for single scene
     data_list = []

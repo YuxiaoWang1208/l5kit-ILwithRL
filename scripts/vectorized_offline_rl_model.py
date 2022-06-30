@@ -506,9 +506,9 @@ class VectorOfflineRLModel(VectorizedModel):
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # ==== get additional info from the batch, or fall back to sensible defaults
-        #按照一定概率添加扰动
-        if random.random()<0.1:
-            data_batch=self.pertube(data_batch)   #对target轨迹数据添加 ChauffeurNet 方式的扰动
+        # #按照一定概率添加扰动
+        # if random.random()<0.1:
+        #     data_batch=self.pertube(data_batch)   #对target轨迹数据添加 ChauffeurNet 方式的扰动
 
 
         future_num_frames = data_batch["target_availabilities"].shape[1]
