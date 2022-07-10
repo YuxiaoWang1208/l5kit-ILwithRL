@@ -484,6 +484,13 @@ class VectorOfflineRLModel(VectorizedModel):
             if idx == inference_step - 1:
                 trajectory_value += value_outputs
 
+        # pred_positions, pred_yaws = first_step[..., :2], first_step[..., 2:3]
+        # if self.normalize_targets:
+        #     pred_positions *= self.xy_scale
+
+        # eval_dict = {"positions": pred_positions, "yaws": pred_yaws,}
+
+
 
         return first_step, agents_polys_horizon, trajectory_value, one_step_planning, one_step_other_agents_prediction
 
