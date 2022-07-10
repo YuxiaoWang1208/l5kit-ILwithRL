@@ -52,7 +52,9 @@ class EnsembleOfflineRLModel(nn.Module):
             # print(np.sum(np.array(self.trajectory_value_list),axis=0))
             # return first_step
 
-            results = self.models[0](data)
+            results,values = self.models[0](data)
+            self.trajectory_value_list.append(values)
+            print(np.sum(np.array(self.trajectory_value_list)))
             return results
 
             # #只考虑策略网络输出
@@ -485,29 +487,7 @@ class VectorOfflineRLModel(VectorizedModel):
 
         return first_step, agents_polys_horizon, trajectory_value, one_step_planning, one_step_other_agents_prediction
 
-    def pertube(self,data_batch):
-        device=data_batch['target_positions'].device
-        predict_length=data_batch['target_positions'].shape[1]
-        mid_position=data_batch['target_positions'][:,predict_length//2,:]   #取中间的一个点作为中点，施加扰动
-        random_position=torch.rand(mid_position.shape[0],mid_position.shape[1],device=device)-0.5   #-0.5 到 0.5
-        new_mid_position=mid_position+random_position
-        mid_yaw=data_batch['target_yaws'][:,predict_length//2,:]
-        random_yaw=torch.rand(mid_yaw.shape[0],mid_yaw.shape[1],device=device)*2-1   #-1 到 1
-        new_mid_yaw=mid_yaw+random_yaw
-        start_position=data_batch['target_positions'][:,0,:]
-        end_position=data_batch['target_positions'][:,-1,:]
-        start_yaw=data_batch['target_yaws'][:,0,:]
-        end_yaw=data_batch['target_yaws'][:,-1,:]
-        for i in range(1,predict_length//2+1):
-            data_batch['target_positions'][:,i,:]=start_position+i/(predict_length//2)*(new_mid_position-start_position)
-            data_batch['target_yaws'][:,i,:]=start_yaw+i/(predict_length//2)*(new_mid_yaw-start_yaw)
-        half_length=predict_length-predict_length//2-1
-        for j in range(predict_length//2+1,predict_length):
-            data_batch['target_positions'][:,j,:]=new_mid_position+(j-predict_length//2)/half_length*(end_position-new_mid_position)
-            data_batch['target_yaws'][:, j, :] = new_mid_yaw + (j - predict_length // 2) / half_length * (
-                        end_yaw - new_mid_yaw)
 
-        return data_batch
 
     def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # ==== get additional info from the batch, or fall back to sensible defaults
@@ -739,7 +719,7 @@ class VectorOfflineRLModel(VectorizedModel):
 
             if attns is not None:
                 eval_dict["attention_weights"] = attns
-            return eval_dict
+            return eval_dict,value_outputs
 
     def model_call(
             self,
