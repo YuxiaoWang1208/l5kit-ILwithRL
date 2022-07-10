@@ -12,6 +12,7 @@ from l5kit.planning.vectorized.global_graph import MultiheadAttentionGlobalHead
 from l5kit.planning.vectorized.open_loop_model import VectorizedModel
 from torch import nn
 import random
+import numpy as np
 
 import reward as reward
 from l5kit.planning.vectorized.common import build_target_normalization
@@ -36,19 +37,23 @@ class EnsembleOfflineRLModel(nn.Module):
     def __init__(self, models):
         super().__init__()
         self.models = nn.ModuleList(models)
+        self.trajectory_value_list=[]
         # self.optimizer = optim.Adam(self.parameters(), lr=1e-3)
 
     def forward(self, data):
+
         if self.training:
             # results = [model(data) for model, data in zip(self.models, data_list)]
             results = [model(data) for model in self.models]
             return results
         else:
-            first_step, trajectory, one_step_planning, one_step_other_agents_prediction, _ = self.mpc(data)
-            return first_step
+            # first_step, trajectory, one_step_planning, one_step_other_agents_prediction, all_trajectory_and_value = self.mpc(data)
+            # self.trajectory_value_list.append(all_trajectory_and_value['trajectory_value'])
+            # print(np.sum(np.array(self.trajectory_value_list),axis=0))
+            # return first_step
 
-            # results = self.models[0](data)
-            # return results
+            results = self.models[0](data)
+            return results
 
             # #只考虑策略网络输出
             # first_step, _, trajectory_value = self.models[0].inference(data)
