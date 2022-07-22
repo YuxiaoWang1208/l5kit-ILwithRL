@@ -6,7 +6,7 @@ format_version: 7
 model_params:
   history_num_frames_ego: 1  # this will also create raster history (we need to remove the raster from train/eval dataset - only visualization)
   history_num_frames: 0
-  history_num_frames_agents: 3
+  history_num_frames_agents: 10
   step_time: 0.1
   disable_other_agents: False
   disable_map: False

@@ -52,9 +52,9 @@ class EnsembleOfflineRLModel(nn.Module):
             # print(np.sum(np.array(self.trajectory_value_list),axis=0))
             # return first_step
 
-            results,values = self.models[0](data)
-            self.trajectory_value_list.append(values)
-            print(np.sum(np.array(self.trajectory_value_list)))
+            results = self.models[0](data)
+            # self.trajectory_value_list.append(values)
+            # print(np.sum(np.array(self.trajectory_value_list)))
             return results
 
             # #只考虑策略网络输出
@@ -490,6 +490,17 @@ class VectorOfflineRLModel(VectorizedModel):
 
         # eval_dict = {"positions": pred_positions, "yaws": pred_yaws,}
 
+        # pred_positions, pred_yaws = outputs[..., :2], outputs[..., 2:3]
+        # if self.normalize_targets:
+        #     pred_positions *= self.xy_scale
+        #
+        # pred_positions_other_agents, pred_yaws_other_agents = all_other_agent_prediction[...,
+        #                                                       :2], all_other_agent_prediction[..., 2:3]
+        #
+        # eval_dict = {"positions": pred_positions, "yaws": pred_yaws,
+        #              "positions_other_agents": pred_positions_other_agents,
+        #              "yaws_other_agents": pred_yaws_other_agents}
+
 
 
         return first_step, agents_polys_horizon, trajectory_value, one_step_planning, one_step_other_agents_prediction
@@ -726,7 +737,7 @@ class VectorOfflineRLModel(VectorizedModel):
 
             if attns is not None:
                 eval_dict["attention_weights"] = attns
-            return eval_dict,value_outputs
+            return eval_dict
 
     def model_call(
             self,

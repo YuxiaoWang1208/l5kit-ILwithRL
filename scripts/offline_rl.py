@@ -68,31 +68,28 @@ def load_dataset(cfg, traffic_signal_scene_id_list=None,train=True):
     scene_id_list=[]
     num_of_scenes = 0
     if len(traffic_signal_scene_id_list) > 1:
-        if train==True:
-            for scene_id in traffic_signal_scene_id_list:
-                scene_1 = train_dataset.get_scene_dataset(scene_id)
-                if len(scene_1.dataset.tl_faces) > 0:
-                    data_list.append(scene_1)
-                    num_of_scenes += 1  # 累计有多少个场景
-            train_dataset = ConcatDataset(data_list)
-            print('num_of_scenes:', num_of_scenes)
-            return train_dataset
-        if train==False:
-            for scene_id in traffic_signal_scene_id_list:
-                scene_1 = train_dataset.get_scene_dataset(scene_id)
-                if len(scene_1.dataset.tl_faces) > 0:
-                    data_list.append(scene_1)
-                    scene_id_list.append(scene_id)
-                    num_of_scenes += 1  # 累计有多少个场景
-            print('num_of_scenes:', num_of_scenes)
-            print('scene_id_list:',scene_id_list)
-            return data_list
+        # if train==True:
+        #     for scene_id in traffic_signal_scene_id_list:
+        #         scene_1 = train_dataset.get_scene_dataset(scene_id)
+        #         if len(scene_1.dataset.tl_faces) > 0:
+        #             data_list.append(scene_1)
+        #             num_of_scenes += 1  # 累计有多少个场景
+        #     train_dataset = ConcatDataset(data_list)
+        #     print('num_of_scenes:', num_of_scenes)
+        #     return train_dataset
+        # if train==False:
+        for scene_id in traffic_signal_scene_id_list:
+            scene_1 = train_dataset.get_scene_dataset(scene_id)
+            if len(scene_1.dataset.tl_faces) > 0:
+                data_list.append(scene_1)
+                scene_id_list.append(scene_id)
+                num_of_scenes += 1  # 累计有多少个场景
+        print('num_of_scenes:', num_of_scenes)
+        print('scene_id_list:',scene_id_list)
+        return data_list
     if len(traffic_signal_scene_id_list) == 1:
         train_dataset = train_dataset.get_scene_dataset(traffic_signal_scene_id_list[0])
-        if train==True:
-            return train_dataset
-        else:
-            return [train_dataset]
+        return [train_dataset]
 
 
 def load_model(model_name):
@@ -306,90 +303,92 @@ def evaluation(model, eval_dataset, cfg, eval_zarr,eval_type):
 def train(model, train_dataset, eval_dataset, cfg, writer, date, model_name):
     # todo
     # cfg["train_params"]["max_num_steps"] = int(1e8)
-
-    train_cfg = cfg["train_data_loader"]
-    train_dataloader = DataLoader(train_dataset, shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
-                                  num_workers=train_cfg["num_workers"])
-    # eval_dataset = train_dataset
-
     eval_cfg = cfg["val_data_loader"]
     dm = LocalDataManager(None)
     eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
 
-    losses_train = []
-    # training loops
-    tr_it = iter(train_dataloader)
+    train_cfg = cfg["train_data_loader"]
+    n_iter=0
+    while n_iter<int(cfg["train_params"]["max_num_steps"]):
+        for index in range(len(train_dataset)):
+            print('index:',index,'n_iter:',n_iter)
+            train_dataloader = DataLoader(train_dataset[index], shuffle=train_cfg["shuffle"], batch_size=train_cfg["batch_size"],
+                                          num_workers=train_cfg["num_workers"])
 
-    # prepare for training
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    model.train()
-    torch.set_grad_enabled(True)
+            # training loops
+            # tr_it = iter(train_dataloader)
 
-    progress_bar = tqdm(range(int(cfg["train_params"]["max_num_steps"])))
-    for n_iter in progress_bar:
-        try:
-            data = next(tr_it)
-        except StopIteration:
-            tr_it = iter(train_dataloader)
-            data = next(tr_it)
-        # Forward pass
-        data = {k: v.to(device) for k, v in data.items()}
-
-        result_list = model(data)
-        optimizer.zero_grad()
-
-        result_list = [result_list]
-
-        for idx, result in enumerate(result_list):
-            loss = result["loss"]
-            writer.add_scalar(f'Loss/model_{idx}_train', loss.item(), n_iter)
-            writer.add_scalar(f'Loss/model_{idx}_train_policy_loss', result["loss_imitate"].item(), n_iter)
-            writer.add_scalar(f'Loss/model_{idx}_train_prediction_loss', result["loss_other_agent_pred"].item(), n_iter)
-            writer.add_scalar(f'Loss/model_{idx}_train_reward_loss', result["loss_reward"].item(), n_iter)
-            writer.add_scalar(f'Loss/model_{idx}_train_value_loss', result["loss_value"].item(), n_iter)
-            writer.add_scalar(f'Loss/model_{idx}_train_speed_loss', result["loss_speed"].item(), n_iter)
-            writer.add_scalar(f'Loss/model_{idx}_train_tl_loss', result["loss_tl"].item(), n_iter)
-
-            loss.backward()
-
-        # Backward pass
-        optimizer.step()
-
-        # losses_train.append(loss.item())
-        # progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
-
-        if n_iter % cfg["train_params"]["checkpoint_every_n_steps"] == 0:
-            # save model
-            # to_save = torch.jit.script(model.cpu())
-            dir_to_save = Path(project_path, "tmp" + str(date), model_name)
-            dir_to_save.mkdir(parents=True, exist_ok=True)
-            path_to_save = Path(dir_to_save, f"iter_{n_iter:07}.pt")
-            # to_save.save(path_to_save)
-            # model.save(path_to_save)
-            torch.save(model.state_dict(), path_to_save)
-            print(f"MODEL STORED at {path_to_save}")
-
-        if n_iter % cfg["train_params"]["eval_every_n_steps"] ==0:
-            model.eval()
-            #开环评估
-            open_loop_results = evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="open_loop")
-            writer.add_scalar(f'Eval/ade', open_loop_results["ade"].item(), n_iter)
-            writer.add_scalar(f'Eval/fde', open_loop_results["fde"].item(), n_iter)
-            writer.add_scalar(f'Eval/angle_dis', open_loop_results["angle_dis"].item(), n_iter)
-
-            #闭环评估   evaluation(model, eval_type="close_loop")
-            eval_results = evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="closed_loop")
-
-            writer.add_scalar(f'Eval/displacement_error_l2', eval_results["displacement_error_l2"].item(), n_iter)
-            writer.add_scalar(f'Eval/distance_ref_trajectory', eval_results["distance_ref_trajectory"].item(), n_iter)
-            writer.add_scalar(f'Eval/collision_front', eval_results["collision_front"].item(), n_iter)
-            writer.add_scalar(f'Eval/collision_rear', eval_results["collision_rear"].item(), n_iter)
-            writer.add_scalar(f'Eval/collision_side', eval_results["collision_side"].item(), n_iter)
-
+            # prepare for training
+            device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+            model = model.to(device)
+            optimizer = optim.Adam(model.parameters(), lr=1e-3)
             model.train()
             torch.set_grad_enabled(True)
+
+            # progress_bar = tqdm(range(int(cfg["train_params"]["max_num_steps"])))
+            for idx_data, data in enumerate(train_dataloader):
+                n_iter+=1
+                # try:
+                #     data = next(tr_it)
+                # except StopIteration:
+                #     tr_it = iter(train_dataloader)
+                #     data = next(tr_it)
+                # Forward pass
+                data = {k: v.to(device) for k, v in data.items()}
+
+                result_list = model(data)
+                optimizer.zero_grad()
+
+                result_list = [result_list]
+
+                for idx, result in enumerate(result_list):
+                    loss = result["loss"]
+                    writer.add_scalar(f'Loss/model_{idx}_train', loss.item(), n_iter)
+                    writer.add_scalar(f'Loss/model_{idx}_train_policy_loss', result["loss_imitate"].item(), n_iter)
+                    writer.add_scalar(f'Loss/model_{idx}_train_prediction_loss', result["loss_other_agent_pred"].item(), n_iter)
+                    writer.add_scalar(f'Loss/model_{idx}_train_reward_loss', result["loss_reward"].item(), n_iter)
+                    writer.add_scalar(f'Loss/model_{idx}_train_value_loss', result["loss_value"].item(), n_iter)
+                    writer.add_scalar(f'Loss/model_{idx}_train_speed_loss', result["loss_speed"].item(), n_iter)
+                    writer.add_scalar(f'Loss/model_{idx}_train_tl_loss', result["loss_tl"].item(), n_iter)
+
+                    loss.backward()
+
+                # Backward pass
+                optimizer.step()
+
+                # losses_train.append(loss.item())
+                # progress_bar.set_description(f"loss: {loss.item()} loss(avg): {np.mean(losses_train)}")
+
+                if n_iter % cfg["train_params"]["checkpoint_every_n_steps"] == 0:
+                    # save model
+                    # to_save = torch.jit.script(model.cpu())
+                    dir_to_save = Path(project_path, "tmp" + str(date), model_name)
+                    dir_to_save.mkdir(parents=True, exist_ok=True)
+                    path_to_save = Path(dir_to_save, f"iter_{n_iter:07}.pt")
+                    # to_save.save(path_to_save)
+                    # model.save(path_to_save)
+                    torch.save(model.state_dict(), path_to_save)
+                    print(f"MODEL STORED at {path_to_save}")
+
+                if n_iter % cfg["train_params"]["eval_every_n_steps"] ==0:
+                    model.eval()
+                    # #开环评估
+                    open_loop_results = evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="open_loop")
+                    writer.add_scalar(f'Eval/ade', open_loop_results["ade"].item(), n_iter)
+                    writer.add_scalar(f'Eval/fde', open_loop_results["fde"].item(), n_iter)
+                    writer.add_scalar(f'Eval/angle_dis', open_loop_results["angle_dis"].item(), n_iter)
+
+                    #闭环评估   evaluation(model, eval_type="close_loop")
+                    eval_results = evaluation(model, eval_dataset, cfg, eval_zarr, eval_type="closed_loop")
+
+                    writer.add_scalar(f'Eval/displacement_error_l2', eval_results["displacement_error_l2"].item(), n_iter)
+                    writer.add_scalar(f'Eval/distance_ref_trajectory', eval_results["distance_ref_trajectory"].item(), n_iter)
+                    writer.add_scalar(f'Eval/collision_front', eval_results["collision_front"].item(), n_iter)
+                    writer.add_scalar(f'Eval/collision_rear', eval_results["collision_rear"].item(), n_iter)
+                    writer.add_scalar(f'Eval/collision_side', eval_results["collision_side"].item(), n_iter)
+
+                    model.train()
+                    torch.set_grad_enable
 
 
 
@@ -404,38 +403,50 @@ def load_config_data(path: str) -> dict:
     return cfg
 
 
-def evaluate_with_baseline():
+def evaluate_with_baseline(eval_dataset):
     # ===== INIT DATASET  FOR EVALUATE
     dm = LocalDataManager(None)
     eval_cfg = cfg["val_data_loader"]
     eval_zarr = ChunkedDataset(dm.require(eval_cfg["key"])).open()
 
+
     # MBOP
-    model_name = OFFLINE_RL_PLANNER
+    model_name = "Offline RL Planner"
+    weights_scaling = [1.0, 1.0, 1.0]
+    _num_predicted_frames = cfg["model_params"]["future_num_frames"]
+    _num_predicted_params = len(weights_scaling)
+    kwargs = dict(
+        history_num_frames_ego=cfg["model_params"]["history_num_frames_ego"],
+        history_num_frames_agents=cfg["model_params"]["history_num_frames_agents"],
+        num_targets=_num_predicted_params * _num_predicted_frames,
+        weights_scaling=weights_scaling,
+        criterion=torch.nn.L1Loss(reduction="none"),
+        global_head_dropout=cfg["model_params"]["global_head_dropout"],
+        disable_other_agents=cfg["model_params"]["disable_other_agents"],
+        disable_map=cfg["model_params"]["disable_map"],
+        disable_lane_boundaries=cfg["model_params"]["disable_lane_boundaries"],
+        cfg=cfg
+    )
 
-    # model=load_model(model_name)
-    # model.load_state_dict(torch.load('/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmponly_policy/'
-    #                                  'Offline RL Planner-train_flag_0signal_scene_13-il_weight_1.0-pred_weight_1.0-1/iter_0268000.pt'))
+    num_ensemble = 2
+    model_list = [VectorOfflineRLModel(**kwargs) for _ in range(num_ensemble)]
 
-    num_ensemble = 4
-    model_list = [load_model(model_name) for _ in range(num_ensemble)]
+    model_path0 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmphistory_3_perturb_2_1000/Offline RL Planner-train_flag_0signal_scene_0-il_weight_1.0-pred_weight_1.0-pretrained_True-1/iter_0050000.pt"
+    model_path1 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmphistory_3_perturb_2_1000/Offline RL Planner-train_flag_0signal_scene_0-il_weight_1.0-pred_weight_1.0-pretrained_True-1/iter_0080000.pt"
+    # model_path2 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmphistory_10_perturb_2_1000_0.3/Offline RL Planner-train_flag_0signal_scene_0-il_weight_1.0-pred_weight_1.0-pretrained_True-1/iter_0020000.pt"
+    # model_path3 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmphistory_10_perturb_2_1000_0.3/Offline RL Planner-train_flag_0signal_scene_0-il_weight_1.0-pred_weight_1.0-pretrained_True-1/iter_0020000.pt"
 
-    model_path0 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmp0605/" \
-                  "Offline RL Planner-train_flag_0signal_scene_13-il_weight_1.0-pred_weight_1.0-1/iter_0005000.pt"
-    model_path1 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmp0604_2/" \
-                  "Offline RL Planner-train_flag_1signal_scene_13-il_weight_1.0-pred_weight_1.0-1/iter_0005000.pt"
-    model_path2 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmp0604_2/" \
-                  "Offline RL Planner-train_flag_2signal_scene_13-il_weight_1.0-pred_weight_1.0-1/iter_0005000.pt"
-    model_path3 = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmp0604_2/" \
-                  "Offline RL Planner-train_flag_3signal_scene_13-il_weight_1.0-pred_weight_1.0-1/iter_0005000.pt"
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model_list[0].load_state_dict(torch.load(model_path0))
     model_list[1].load_state_dict(torch.load(model_path1))
-    model_list[2].load_state_dict(torch.load(model_path2))
-    model_list[3].load_state_dict(torch.load(model_path3))
+    # model_list[2].load_state_dict(torch.load(model_path2))
+    # model_list[3].load_state_dict(torch.load(model_path3))
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = EnsembleOfflineRLModel(model_list)
     model = model.to(device)
+    model = model.eval()
+    torch.set_grad_enabled(False)
 
     # baseline urban_driver
     # model_path = "/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/examples/urban_driver/MS.pt"
@@ -492,6 +503,14 @@ def train_process(train_flag, date, traffic_signal_scene_id, imitate_loss_weight
         # model.load_state_dict(torch.load('/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmpperturb_2_13_0.3/'
         #                                  'Offline RL Planner-train_flag_0signal_scene_13-il_weight_1.0-pred_weight_1.0-pretrained_True-1/iter_0040000.pt'),strict=False)
 
+        dir_to_save = Path(project_path, "tmp" + str(date), model_name)
+        dir_to_save.mkdir(parents=True, exist_ok=True)
+        path_to_save = Path(dir_to_save, f"initial.pt")
+        # to_save.save(path_to_save)
+        # model.save(path_to_save)
+        torch.save(model.state_dict(), path_to_save)
+        print(f"MODEL STORED at {path_to_save}")
+
 
 
     train(model, train_dataset, eval_dataset, cfg, logger, date, model_name=model_log_id)
@@ -510,8 +529,8 @@ if __name__ == '__main__':
     parser.add_argument("--flag", type=str, default='debug')  # 训练模式
     parser.add_argument("--flag_for_kill", type=str, default='ps_and_kill')  # 训练模式
     parser.add_argument("--no_pretrained", action="store_true")
-    parser.add_argument("--start_scene",type=int, default=0)
-    parser.add_argument("--end_scene",type=int, default=1200)
+    parser.add_argument("--start_scene",type=int, default=13)
+    parser.add_argument("--end_scene",type=int, default=14)
 
     args = parser.parse_args()
 
@@ -528,10 +547,9 @@ if __name__ == '__main__':
     cfg.update(vars(args))
     print(cfg)
 
-    # to test all traffic signal scenarios
-    # traffic_signal_scene_id = None
+
     train_traffic_signal_scene_id_list=list(np.arange(args.start_scene,args.end_scene))
-    eval_traffic_signal_scene_id_list = list(np.arange(0,15))
+    eval_traffic_signal_scene_id_list = list(np.arange(13,14))
     train_dataset= load_dataset(cfg, train_traffic_signal_scene_id_list,train=True)
     eval_dataset = load_dataset(cfg, eval_traffic_signal_scene_id_list,train=False)   #测试数据集是一个列表，包含多个场景的测试数据
 
@@ -548,4 +566,4 @@ if __name__ == '__main__':
     [p.join() for p in process]  # 等待两个进程依次结束
 
     # 评估网络模型
-    # evaluate_with_baseline()
+    # evaluate_with_baseline(eval_dataset)
