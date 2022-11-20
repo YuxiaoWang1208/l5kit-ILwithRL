@@ -13,7 +13,7 @@ from l5kit.planning import utils
 from l5kit.vectorization.vectorizer_builder import build_vectorizer
 
 # project_path = str(Path(__file__).parents[1])
-project_path = "/mnt/share_disk/user/xijinhao/l5kit"
+project_path = "/mnt/share_disk/user/wangyuxiao/l5kit-RL-pre_train"
 print("project path: ", project_path)
 sys.path.append(project_path)
 # print(sys.path)

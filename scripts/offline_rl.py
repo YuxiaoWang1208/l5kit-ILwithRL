@@ -40,7 +40,7 @@ print(sys.path)
 from vectorized_offline_rl_model import VectorOfflineRLModel, EnsembleOfflineRLModel
 from pathlib import Path
 
-os.environ["L5KIT_DATA_FOLDER"] = "/mnt/share_disk/user/public/l5kit/prediction"
+os.environ["L5KIT_DATA_FOLDER"] = "/mnt/share_disk/user/public/l5kit/l5kit/prediction"
 
 URBAN_DRIVER = "Urban Driver"
 OPEN_LOOP_PLANNER = "Open Loop Planner"
@@ -481,35 +481,35 @@ def train_process(train_flag, date, traffic_signal_scene_id, imitate_loss_weight
 
     model = load_model(model_name)
 
-    pretrained_model_dir = "/mnt/share_disk/user/daixingyuan/l5kit/pretrained_model"
-    pretrained_model_name = "OL_HS"
-    pretrained_model_path = os.path.join(pretrained_model_dir, pretrained_model_name + ".pt")
+    # pretrained_model_dir = "/mnt/share_disk/user/daixingyuan/l5kit/pretrained_model"
+    # pretrained_model_name = "OL_HS"
+    # pretrained_model_path = os.path.join(pretrained_model_dir, pretrained_model_name + ".pt")
 
-    pretrained_model = torch.load(pretrained_model_path)
+    # pretrained_model = torch.load(pretrained_model_path)
 
-    if not cfg["no_pretrained"]:
-        # assign the pretrained model to the current model
-        # model.load_state_dict(pretrained_model)
-        pretrained_model_state_dict = pretrained_model.state_dict()
-        model.load_state_dict(pretrained_model_state_dict, strict=False)
-        # fix parameters of the model
-        # unfixed last two layer of policy net
-        unfixed_paras = ["global_head.output_embed.layers.1.weight", 'global_head.output_embed.layers.2.weight',
-                         "global_head.output_embed.layers.1.bias", "global_head.output_embed.layers.2.bias"]
-        for name, param in model.named_parameters():
-            if name in pretrained_model_state_dict and name not in unfixed_paras:
-                param.requires_grad = False
+    # if not cfg["no_pretrained"]:
+    #     # assign the pretrained model to the current model
+    #     # model.load_state_dict(pretrained_model)
+    #     pretrained_model_state_dict = pretrained_model.state_dict()
+    #     model.load_state_dict(pretrained_model_state_dict, strict=False)
+    #     # fix parameters of the model
+    #     # unfixed last two layer of policy net
+    #     unfixed_paras = ["global_head.output_embed.layers.1.weight", 'global_head.output_embed.layers.2.weight',
+    #                      "global_head.output_embed.layers.1.bias", "global_head.output_embed.layers.2.bias"]
+    #     for name, param in model.named_parameters():
+    #         if name in pretrained_model_state_dict and name not in unfixed_paras:
+    #             param.requires_grad = False
 
-        # model.load_state_dict(torch.load('/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmpperturb_2_13_0.3/'
-        #                                  'Offline RL Planner-train_flag_0signal_scene_13-il_weight_1.0-pred_weight_1.0-pretrained_True-1/iter_0040000.pt'),strict=False)
+    #     # model.load_state_dict(torch.load('/mnt/share_disk/user/xijinhao/l5kit-model-based-offline-rl/tmpperturb_2_13_0.3/'
+    #     #                                  'Offline RL Planner-train_flag_0signal_scene_13-il_weight_1.0-pred_weight_1.0-pretrained_True-1/iter_0040000.pt'),strict=False)
 
-        dir_to_save = Path(project_path, "tmp" + str(date), model_name)
-        dir_to_save.mkdir(parents=True, exist_ok=True)
-        path_to_save = Path(dir_to_save, f"initial.pt")
-        # to_save.save(path_to_save)
-        # model.save(path_to_save)
-        torch.save(model.state_dict(), path_to_save)
-        print(f"MODEL STORED at {path_to_save}")
+    #     dir_to_save = Path(project_path, "tmp" + str(date), model_name)
+    #     dir_to_save.mkdir(parents=True, exist_ok=True)
+    #     path_to_save = Path(dir_to_save, f"initial.pt")
+    #     # to_save.save(path_to_save)
+    #     # model.save(path_to_save)
+    #     torch.save(model.state_dict(), path_to_save)
+    #     print(f"MODEL STORED at {path_to_save}")
 
 
 

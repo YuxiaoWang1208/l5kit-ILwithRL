@@ -654,7 +654,7 @@ class VectorOfflineRLModel(VectorizedModel):
         lane_bdry_len = data_batch["lanes"].shape[1]
 
         # call the model with these features
-        outputs, attns, all_other_agent_prediction , reward_outputs, value_outputs, speed_outputs,tl_outputs= self.model_call(
+        outputs, attns, all_other_agent_prediction , reward_outputs, value_outputs, speed_outputs, tl_outputs= self.model_call(
             agents_polys,
             static_polys,
             agents_availabilities,

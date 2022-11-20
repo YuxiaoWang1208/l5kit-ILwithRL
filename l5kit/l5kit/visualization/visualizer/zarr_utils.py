@@ -190,8 +190,42 @@ def _get_in_out_as_trajectories(in_out: UnrollInputOutput) -> Tuple[np.ndarray, 
     replay_traj = replay_traj[in_out.inputs["target_availabilities"] > 0]
     sim_traj = transform_points(in_out.outputs["positions"],
                                 in_out.inputs["world_from_agent"])
+    # print(in_out.outputs["ego_positions_all"].shape)
+
+    # sim_traj1 = transform_points(in_out.outputs["ego_positions_all"][0, :, :],
+    #                             in_out.inputs["world_from_agent"])
+    # sim_traj2 = transform_points(in_out.outputs["ego_positions_all"][1, :, :],
+    #                             in_out.inputs["world_from_agent"])
+    # sim_traj3 = transform_points(in_out.outputs["ego_positions_all"][2, :, :],
+    #                             in_out.inputs["world_from_agent"])
 
     return replay_traj, sim_traj
+    # return replay_traj, sim_traj1, sim_traj2, sim_traj3
+
+
+def _multimodal_get_in_out_as_trajectories(in_out: UnrollInputOutput) -> Tuple[np.ndarray, np.ndarray]:
+    """Convert the input (log-replayed) and output (simulated) trajectories into world space.
+    Apply availability on the log-replayed one
+
+    :param in_out: an UnrollInputOutput object
+    :return: the replayed and simulated trajectory as numpy arrays
+    """
+    replay_traj = transform_points(in_out.inputs["target_positions"],
+                                   in_out.inputs["world_from_agent"])
+    replay_traj = replay_traj[in_out.inputs["target_availabilities"] > 0]
+    # sim_traj = transform_points(in_out.outputs["positions"],
+    #                             in_out.inputs["world_from_agent"])
+    # print(in_out.outputs["ego_positions_all"].shape)
+
+    sim_traj1 = transform_points(in_out.outputs["ego_positions_all"][0, :, :],
+                                in_out.inputs["world_from_agent"])
+    sim_traj2 = transform_points(in_out.outputs["ego_positions_all"][1, :, :],
+                                in_out.inputs["world_from_agent"])
+    sim_traj3 = transform_points(in_out.outputs["ego_positions_all"][2, :, :],
+                                in_out.inputs["world_from_agent"])
+
+    # return replay_traj, sim_traj
+    return replay_traj, sim_traj1, sim_traj2, sim_traj3
 
 
 def simulation_out_to_visualizer_scene(sim_out: SimulationOutput, mapAPI: MapAPI) -> List[FrameVisualization]:
@@ -226,10 +260,82 @@ def simulation_out_to_visualizer_scene(sim_out: SimulationOutput, mapAPI: MapAPI
         if has_ego_info:
             ego_in_out = ego_ins_outs[frame_idx]
             replay_traj, sim_traj = _get_in_out_as_trajectories(ego_in_out)
+            # replay_traj, sim_traj1, sim_traj2, sim_traj3 = _get_in_out_as_trajectories(ego_in_out)
             trajectories.append(TrajectoryVisualization(xs=replay_traj[:, 0], ys=replay_traj[:, 1],
                                                         color="blue", legend_label="ego_replay", track_id=-1))
             trajectories.append(TrajectoryVisualization(xs=sim_traj[:, 0], ys=sim_traj[:, 1],
                                                         color="red", legend_label="ego_simulated", track_id=-1))
+            # trajectories.append(TrajectoryVisualization(xs=sim_traj1[:, 0], ys=sim_traj1[:, 1],
+            #                                             color="red", legend_label="ego_simulated", track_id=-1))
+            # trajectories.append(TrajectoryVisualization(xs=sim_traj2[:, 0], ys=sim_traj2[:, 1],
+            #                                             color="red", legend_label="ego_simulated", track_id=-1))
+            # trajectories.append(TrajectoryVisualization(xs=sim_traj3[:, 0], ys=sim_traj3[:, 1],
+            #                                             color="red", legend_label="ego_simulated", track_id=-1))                                                                                        
+
+        if has_agents_info:
+            agents_in_out = agents_ins_outs[frame_idx]
+            for agent_in_out in agents_in_out:
+                track_id = agent_in_out.inputs["track_id"]
+                replay_traj, sim_traj = _get_in_out_as_trajectories(agent_in_out)
+                trajectories.append(TrajectoryVisualization(xs=replay_traj[:, 0], ys=replay_traj[:, 1],
+                                                            color="orange", legend_label="agent_replay",
+                                                            track_id=track_id))
+                trajectories.append(TrajectoryVisualization(xs=sim_traj[:, 0], ys=sim_traj[:, 1],
+                                                            color="purple", legend_label="agent_simulated",
+                                                            track_id=track_id))
+
+        frame_vis = FrameVisualization(ego=frame_vis.ego, agents=frame_vis.agents,
+                                       lanes=frame_vis.lanes, crosswalks=frame_vis.crosswalks,
+                                       trajectories=trajectories)
+
+        frames_vis.append(frame_vis)
+
+    return frames_vis
+
+
+def multimodal_simulation_out_to_visualizer_scene(sim_out: SimulationOutput, mapAPI: MapAPI) -> List[FrameVisualization]:
+    """Convert a simulation output into a scene we can visualize.
+    The scene will include replayed and simulated trajectories for ego and agents when these are
+    simulated.
+
+    :param sim_out: the simulation output
+    :param mapAPI: a MapAPI object
+    :return: a list of FrameVisualization for the scene
+    """
+    frames = sim_out.simulated_ego
+    agents_frames = filter_agents_by_frames(frames, sim_out.simulated_agents)
+    tls_frames = filter_tl_faces_by_frames(frames, sim_out.simulated_dataset.dataset.tl_faces)
+    agents_th = sim_out.simulated_dataset.cfg["raster_params"]["filter_agents_threshold"]
+    ego_ins_outs = sim_out.ego_ins_outs
+    agents_ins_outs = sim_out.agents_ins_outs
+
+    has_ego_info = len(ego_ins_outs) > 0
+    has_agents_info = len(agents_ins_outs) > 0
+
+    frames_vis: List[FrameVisualization] = []
+    for frame_idx in range(len(frames)):
+        frame = frames[frame_idx]
+        tls_frame = tls_frames[frame_idx]
+
+        agents_frame = agents_frames[frame_idx]
+        agents_frame = filter_agents_by_labels(agents_frame, agents_th)
+        frame_vis = _get_frame_data(mapAPI, frame, agents_frame, tls_frame)
+        trajectories = []
+
+        if has_ego_info:
+            ego_in_out = ego_ins_outs[frame_idx]
+            # replay_traj, sim_traj = _get_in_out_as_trajectories(ego_in_out)
+            replay_traj, sim_traj1, sim_traj2, sim_traj3 = _multimodal_get_in_out_as_trajectories(ego_in_out)
+            trajectories.append(TrajectoryVisualization(xs=replay_traj[:, 0], ys=replay_traj[:, 1],
+                                                        color="blue", legend_label="ego_replay", track_id=-1))
+            # trajectories.append(TrajectoryVisualization(xs=sim_traj[:, 0], ys=sim_traj[:, 1],
+            #                                             color="red", legend_label="ego_simulated", track_id=-1))
+            trajectories.append(TrajectoryVisualization(xs=sim_traj1[:, 0], ys=sim_traj1[:, 1],
+                                                        color="red", legend_label="ego_simulated", track_id=-1))
+            trajectories.append(TrajectoryVisualization(xs=sim_traj2[:, 0], ys=sim_traj2[:, 1],
+                                                        color="red", legend_label="ego_simulated", track_id=-1))
+            trajectories.append(TrajectoryVisualization(xs=sim_traj3[:, 0], ys=sim_traj3[:, 1],
+                                                        color="red", legend_label="ego_simulated", track_id=-1))                                                                                        
 
         if has_agents_info:
             agents_in_out = agents_ins_outs[frame_idx]
