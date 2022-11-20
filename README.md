@@ -1,3 +1,12 @@
+2022.11.20 王宇霄：
+多模态和价值评价的预测和规划
+scripts/vect_multimodal_task_model.py : 多模态模型Module
+scripts/vect_multimodal_task_learn.py : 训练文件
+scripts/vect_multimodal_task_config.yaml : 配置文件
+scripts/vect_multimodal_task_CLtest.py : 闭环测试文件
+tmpxxxx : 训练好的模型
+logxxxx : 训练日志文件
+
 
 Welcome to **L5Kit**. L5Kit is a Python library with functionality for the development and training of *learned prediction, planning and simulation* models for autonomous driving applications.
 
