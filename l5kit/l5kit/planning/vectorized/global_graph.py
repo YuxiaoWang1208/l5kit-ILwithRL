@@ -146,3 +146,33 @@ class MultiheadAttentionGlobalHead(nn.Module):
         out, attns = self.encoder(inputs[[0]], inputs + type_embedding, inputs, mask)
         outputs = self.output_embed(out[0]).view(-1, self.num_timesteps, self.num_outputs)
         return outputs, attns
+
+
+class MultimodalMultiheadAttentionGlobalHead(nn.Module):
+    """Global graph making use of multi-head attention.
+    """
+
+    def __init__(self, d_model: int, num_targets: int, nhead: int = 8, dropout: float = 0.1):
+        super().__init__()
+        self.num_targets = num_targets
+        self.encoder = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        self.output_embed = MLP(d_model, d_model * 4, num_targets, num_layers=3)
+
+    def forward(
+        self, inputs: torch.Tensor, type_embedding: torch.Tensor, mask: torch.Tensor
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """Model forward:
+
+        :param inputs: model inputs
+        :param type_embedding: type embedding describing the different input types
+        :param mask: availability mask
+
+        :return tuple of outputs, attention
+        """
+        # dot-product attention:
+        #   - query is ego's vector
+        #   - key is inputs plus type embedding
+        #   - value is inputs
+        out, attns = self.encoder(inputs[[0]], inputs + type_embedding, inputs, mask)
+        outputs = self.output_embed(out[0])
+        return outputs, attns
