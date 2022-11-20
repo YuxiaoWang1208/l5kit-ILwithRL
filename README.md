@@ -1,10 +1,10 @@
 ## 2022.11.20 王宇霄：
 ### 多模态和价值评价的预测和规划
-scripts/vect_multimodal_task_model.py : 多模态模型Module/n
-scripts/vect_multimodal_task_learn.py : 训练文件/n
-scripts/vect_multimodal_task_config.yaml : 配置文件/n
-scripts/vect_multimodal_task_CLtest.py : 闭环测试文件/n
-tmpxxxx : 训练好的模型/n
+scripts/vect_multimodal_task_model.py : 多模态模型Module    
+scripts/vect_multimodal_task_learn.py : 训练文件    
+scripts/vect_multimodal_task_config.yaml : 配置文件    
+scripts/vect_multimodal_task_CLtest.py : 闭环测试文件    
+tmpxxxx : 训练好的模型    
 logxxxx : 训练日志文件
 
 
