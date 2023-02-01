@@ -1,5 +1,11 @@
 import os
 import sys
+# Home path
+from pathlib import Path
+
+project_path = str(Path(__file__).parents[1])
+print("reward.py project path: ", project_path)
+sys.path.append(project_path)
 
 # from pycharm
 import numpy as np
@@ -12,11 +18,6 @@ from l5kit.evaluation.metrics import distance_to_reference_trajectory
 from l5kit.planning import utils
 from l5kit.vectorization.vectorizer_builder import build_vectorizer
 
-# project_path = str(Path(__file__).parents[1])
-project_path = "/mnt/share_disk/user/wangyuxiao/l5kit-RL-pre_train"
-print("project path: ", project_path)
-sys.path.append(project_path)
-# print(sys.path)
 
 # prepare data path and load cfg
 os.environ["L5KIT_DATA_FOLDER"] = "/mnt/share_disk/user/public/l5kit/prediction"
@@ -24,8 +25,6 @@ os.environ["L5KIT_DATA_FOLDER"] = "/mnt/share_disk/user/public/l5kit/prediction"
 dm = LocalDataManager(None)
 # get config
 
-# Home path
-from pathlib import Path
 
 dm = LocalDataManager(None)
 # get config

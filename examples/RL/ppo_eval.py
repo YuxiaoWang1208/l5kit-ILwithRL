@@ -6,6 +6,8 @@ project_path = "/root/zhufenghua12/wangyuxiao/l5kit-wyx/l5kit"
 print("project path: ", project_path)
 sys.path.append(project_path)
 
+from pathlib import Path
+
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
@@ -24,11 +26,6 @@ os.chdir("/root/zhufenghua12/wangyuxiao/l5kit-wyx/examples/RL")
 if "L5KIT_DATA_FOLDER" not in os.environ:
     raise KeyError("L5KIT_DATA_FOLDER environment variable not set")
 
-lr = 3e-4  # 3e-4 3e-3
-from l5kit.configs import load_config_data
-# get config
-cfg = load_config_data(os.getcwd() + "/gym_config.yaml")
-rand = cfg["gym_params"]["randomize_start_frame"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -37,19 +34,19 @@ if __name__ == "__main__":
                         help='Path to L5Kit environment config file')
     parser.add_argument('-o', '--output', type=str, default='PPO',
                         help='File name for saving model states')
-    parser.add_argument('--load', type=str, # default='./logs/PPO_100000_steps.zip',
+    parser.add_argument('--load', type=str, default='./logs_lr0.0003len128/PPO_1000000_steps.zip',  # './logs_lr0.0003len128/PPO_1000000_steps.zip'
                         help='Path to load model and continue training')
     parser.add_argument('--simnet', action='store_true',
                         help='Use simnet to control agents')
     parser.add_argument('--simnet_model_path', default=None, type=str,
                         help='Path to simnet model that controls agents')
-    parser.add_argument('--tb_log', default='./tb_log_lr' + str(lr) + "len256" + '/', type=str,
+    parser.add_argument('--tb_log', default='./tb_log/', type=str,
                         help='Tensorboard log folder')
-    parser.add_argument('--save_path', default='./logs_lr' + str(lr) + "len256" + '/', type=str,
+    parser.add_argument('--save_path', default='./logs/', type=str,
                         help='Folder to save model checkpoints')
-    parser.add_argument('--save_freq', default=10000, type=int,  # 100000 1000
+    parser.add_argument('--save_freq', default=1000, type=int,  # 100000 1000
                         help='Frequency to save model checkpoints')
-    parser.add_argument('--eval_freq', default=10000, type=int,  # 100000 1000
+    parser.add_argument('--eval_freq', default=1000, type=int,  # 100000 1000
                         help='Frequency to evaluate model state')
     parser.add_argument('--n_eval_episodes', default=1, type=int,  # 10
                         help='Number of episodes to evaluate')
@@ -61,7 +58,7 @@ if __name__ == "__main__":
                         help='Number of model training epochs per update')
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Mini batch size of model update')
-    parser.add_argument('--lr', default=lr, type=float,  # 3e-4
+    parser.add_argument('--lr', default=3e-4, type=float,
                         help='Learning rate')
     parser.add_argument('--gamma', default=0.95, type=float,
                         help='Discount factor')
@@ -81,7 +78,7 @@ if __name__ == "__main__":
                         help='Number of parallel environments')
     parser.add_argument('--n_eval_envs', default=4, type=int,
                         help='Number of parallel environments for evaluation')
-    parser.add_argument('--eps_length', default=256, type=int,  # 32 128 256
+    parser.add_argument('--eps_length', default=128, type=int,
                         help='Episode length of gym rollouts')
     parser.add_argument('--rew_clip', default=15, type=float,
                         help='Reward clipping threshold')
@@ -147,4 +144,73 @@ if __name__ == "__main__":
                                       scene_id_to_type_path=args.scene_id_to_type_path)
 
     # train
-    model.learn(args.n_steps, callback=[checkpoint_callback, eval_callback])
+    # model.learn(args.n_steps, callback=[checkpoint_callback, eval_callback])
+
+    # visualize
+    rollout_sim_cfg = SimulationConfigGym()
+    rollout_sim_cfg.num_simulation_steps = None
+    rollout_sim_cfg.use_agents_gt = (not args.simnet)
+    rollout_env_kwargs = {'env_config_path': args.config, 'use_kinematic': args.kinematic, 'return_info': True,
+                       'train': False, 'sim_cfg': rollout_sim_cfg, 'simnet_model_path': args.simnet_model_path}
+    rollout_env = make_vec_env("L5-CLE-v0", env_kwargs=rollout_env_kwargs, n_envs=1,
+                            vec_env_cls=SubprocVecEnv, vec_env_kwargs={"start_method": "fork"})
+    import gym
+    from l5kit.visualization.visualizer.zarr_utils import episode_out_to_visualizer_scene_gym_cle
+    from l5kit.visualization.visualizer.visualizer import visualize
+    from bokeh.io import output_notebook, show, output_file, save
+    from l5kit.data import MapAPI
+    from l5kit.environment.gym_metric_set import CLEMetricSet
+    env_config_path = args.config
+    map_env = gym.make("L5-CLE-v0", env_config_path=env_config_path, sim_cfg=rollout_sim_cfg, \
+                        use_kinematic=True, train=False, return_info=True)
+
+    def rollout_episode(model, env, idx = 0):
+        """Rollout a particular scene index and return the simulation output.
+
+        :param model: the RL policy
+        :param env: the gym environment
+        :param idx: the scene index to be rolled out
+        :return: the episode output of the rolled out scene
+        """
+
+        # Set the reset_scene_id to 'idx'
+        env.reset_scene_id = idx
+        
+        # Rollout step-by-step
+        obs = env.reset()
+        done = False
+
+        while True:
+            action, _ = model.predict(obs, deterministic=True)
+            obs, _, done, info = env.step(action)
+            if done[0]:
+                break
+
+        # The episode outputs are present in the key "sim_outs"
+        sim_outs = info[0]["sim_outs"]
+        sim_out = info[0]["sim_outs"][0]
+        return sim_out, sim_outs
+
+    # Rollout one episode
+    sim_out, sim_outs = rollout_episode(model, rollout_env)
+
+    metric_set = CLEMetricSet()
+    metric_set.evaluate(sim_outs)
+    from l5kit.environment.callbacks import L5KitEvalCallback
+    # Aggregate metrics (ADE, FDE)
+    ade_error, fde_error = L5KitEvalCallback.compute_ade_fde(metric_set)
+    print("ade_error: ", ade_error, "fde_error: ", fde_error)
+
+    # might change with different rasterizer
+    map_API = map_env.dataset.rasterizer.sem_rast.mapAPI
+
+    def visualize_outputs(sim_outs, map_API):
+        for sim_out in sim_outs: # for each scene
+            vis_in = episode_out_to_visualizer_scene_gym_cle(sim_out, map_API)
+            save_path = Path(os.getcwd() + "/plots", "plot_" + "PPO_lr0.0003_1000000" + ".html")
+            output_file(save_path)
+            # show(visualize(sim_out.scene_id, vis_in))
+            save(obj=visualize(sim_out.scene_id, vis_in), filename=save_path)
+
+    output_notebook()
+    visualize_outputs([sim_out], map_API)

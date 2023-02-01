@@ -391,18 +391,19 @@ def episode_out_to_visualizer_scene_gym_cle(sim_out: EpisodeOutputGym,
         if has_ego_info:
             ego_in_out = ego_ins_outs[frame_idx]
             replay_traj, sim_traj = _get_in_out_as_trajectories(ego_in_out)
-            scale = 10
+            scale = 1  # 10 1
             ego_centroid = np.array([[frame_vis.ego.center_x, frame_vis.ego.center_y]])
             ego_next_step_replay = ego_centroid + scale * (replay_traj[0:1] - ego_centroid)
+            ego_next_step_replay = replay_traj[0:1]
             ego_next_step_sim = ego_centroid + scale * (sim_traj[0:1] - ego_centroid)
             single_step_replay = np.concatenate([ego_centroid, ego_next_step_replay])
             single_step_sim = np.concatenate([ego_centroid, ego_next_step_sim])
 
             trajectories.append(TrajectoryVisualization(xs=single_step_sim[:, 0], ys=single_step_sim[:, 1],
-                                                        color="green", legend_label="ego_simulated (10x scale)",
+                                                        color="green", legend_label="ego_simulated (1x scale)",  # 10x 1x
                                                         track_id=-1))
             trajectories.append(TrajectoryVisualization(xs=single_step_replay[:, 0], ys=single_step_replay[:, 1],
-                                                        color="yellow", legend_label="ego_replay (10x scale)",
+                                                        color="yellow", legend_label="ego_replay (1x scale)",  # 10x 1x
                                                         track_id=-1))
 
         if has_agents_info:

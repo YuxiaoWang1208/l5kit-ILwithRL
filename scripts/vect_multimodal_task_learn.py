@@ -2,6 +2,11 @@ import os
 import sys
 from pathlib import Path
 
+project_path = str(Path(__file__).parents[1])
+print("project path: ", project_path)
+sys.path.append(project_path)
+sys.path.append(project_path + "/l5kit")
+
 from typing import Dict
 import copy
 
@@ -24,13 +29,10 @@ from vect_multimodal_task_model import VectorMultiModalTaskModel
 
 from torch.utils.tensorboard import SummaryWriter
 
-project_path = str(Path(__file__).parents[1])
-print("project path: ", project_path)
-sys.path.append(project_path)
 
 
 # set env variable for data
-os.environ["L5KIT_DATA_FOLDER"] = "/mnt/share_disk/user/public/l5kit/l5kit/prediction"
+os.environ["L5KIT_DATA_FOLDER"] = "/root/zhufenghua12/l5kit/prediction"
 
 
 def load_dataset(cfg, traffic_signal_scene_id_list=None, train=True):
@@ -242,7 +244,7 @@ if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(gpu_avaliable_list)
 
     # get config
-    cfg = load_config_data("/mnt/share_disk/user/wangyuxiao/l5kit-RL-pre_train/scripts/vect_multimodal_task_config.yaml")
+    cfg = load_config_data("/root/zhufenghua12/wangyuxiao/l5kit-wyx/scripts/vect_multimodal_task_config.yaml")
 
     # train_traffic_signal_scene_id_list=list(np.arange(13, 14))
     # eval_traffic_signal_scene_id_list = list(np.arange(13, 14))
