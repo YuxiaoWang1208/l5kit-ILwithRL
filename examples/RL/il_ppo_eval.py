@@ -26,9 +26,11 @@ os.chdir("/root/zhufenghua12/wangyuxiao/l5kit-wyx/examples/RL")
 if "L5KIT_DATA_FOLDER" not in os.environ:
     raise KeyError("L5KIT_DATA_FOLDER environment variable not set")
 
+from il_ppo import IL_PPO
 
-date = "2023-02-07_16-05"
-steps = "600000"
+
+date = "2023-02-13_10-46"  # "2023-02-13_10-46"
+steps = "130000"  # "120000" the first time to turn to the right direction!!!
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,
@@ -108,7 +110,7 @@ if __name__ == "__main__":
     # define model
     clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
     if args.load is not None:
-        model = PPO.load(args.load, clip_range=clip_schedule, learning_rate=args.lr)
+        model = IL_PPO.load(args.load, clip_range=clip_schedule, learning_rate=args.lr)
     else:
         print("This is evaluation! Please enter model file path.")
 

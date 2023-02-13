@@ -6,6 +6,7 @@ project_path = "/root/zhufenghua12/wangyuxiao/l5kit-wyx/l5kit"
 print("project path: ", project_path)
 sys.path.append(project_path)
 
+from il_ppo import IL_PPO
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
@@ -23,6 +24,13 @@ os.environ["L5KIT_DATA_FOLDER"] = "/root/zhufenghua12/l5kit/prediction"
 os.chdir("/root/zhufenghua12/wangyuxiao/l5kit-wyx/examples/RL")
 if "L5KIT_DATA_FOLDER" not in os.environ:
     raise KeyError("L5KIT_DATA_FOLDER environment variable not set")
+
+import datetime
+
+d = datetime.datetime.now() + datetime.timedelta(hours=8)
+# date = "0207"
+# print(d.strftime('%Y-%m-%d_%H-%M'))
+date = d.strftime('%Y-%m-%d_%H-%M')
 
 lr = 3e-4  # 3e-4 3e-3
 from l5kit.configs import load_config_data
@@ -43,9 +51,9 @@ if __name__ == "__main__":
                         help='Use simnet to control agents')
     parser.add_argument('--simnet_model_path', default=None, type=str,
                         help='Path to simnet model that controls agents')
-    parser.add_argument('--tb_log', default='./tb_log_lr' + str(lr) + "len256" + '/', type=str,
+    parser.add_argument('--tb_log', default='./tb_log_' + date + '/', type=str,
                         help='Tensorboard log folder')
-    parser.add_argument('--save_path', default='./logs_lr' + str(lr) + "len256" + '/', type=str,
+    parser.add_argument('--save_path', default='./logs_' + date + '/', type=str,
                         help='Folder to save model checkpoints')
     parser.add_argument('--save_freq', default=10000, type=int,  # 100000 1000
                         help='Frequency to save model checkpoints')
@@ -81,7 +89,7 @@ if __name__ == "__main__":
                         help='Number of parallel environments')
     parser.add_argument('--n_eval_envs', default=4, type=int,
                         help='Number of parallel environments for evaluation')
-    parser.add_argument('--eps_length', default=256, type=int,  # 32 128 256
+    parser.add_argument('--eps_length', default=128, type=int,  # 32 128
                         help='Episode length of gym rollouts')
     parser.add_argument('--rew_clip', default=15, type=float,
                         help='Reward clipping threshold')
