@@ -1,5 +1,6 @@
+import os
 import warnings
-from typing import Any, Dict, Optional, Type, TypeVar, Union
+from typing import Any, Dict, List, Optional, Type, TypeVar, Union
 
 import numpy as np
 import torch as th
@@ -9,16 +10,21 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
 from stable_baselines3.ppo import PPO
-from stable_baselines3.common.policies import ActorCriticPolicy
+from stable_baselines3.common.policies import BasePolicy, ActorCriticPolicy
 from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Schedule
 from stable_baselines3.common.utils import explained_variance, get_schedule_fn
 
+import sys
+sys.path.append("/root/zhufenghua12/wangyuxiao/l5kit-wyx/examples/RL")
+from modified_policies import MultiInputActorCriticPredPolicy
+
 from get_il_data import get_data
+
 
 SelfPPO = TypeVar("SelfPPO", bound="PPO")
 
 
-class IL_PPO(PPO):
+class PRED_PPO(PPO):
     """
     Imitation Learning(IL) and Proximal Policy Optimization algorithm (PPO) (clip version)
 
@@ -65,10 +71,16 @@ class IL_PPO(PPO):
     :param _init_setup_model: Whether or not to build the network at the creation of the instance
     """
 
+    policy_aliases: Dict[str, Type[BasePolicy]] = {
+        "MultiInputPredPolicy": MultiInputActorCriticPredPolicy,
+    }
+
     def __init__(
         self,
         policy: Union[str, Type[ActorCriticPolicy]],
         env: Union[GymEnv, str],
+        weights_scaling: List[float] = [1., 1., 1.],
+        future_num_frames: Optional[int] = 12,
         criterion: nn.Module = nn.MSELoss(reduction="none"),
         # dmg: Optional[LocalDataManager] = None,
         learning_rate: Union[float, Schedule] = 3e-4,
@@ -76,14 +88,15 @@ class IL_PPO(PPO):
         batch_size: int = 64,
         n_IL_epochs: int = 50,
         n_RL_epochs: int = 50,
+        n_epochs: int = 50,
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         clip_range: Union[float, Schedule] = 0.2,
         clip_range_vf: Union[None, float, Schedule] = None,
         normalize_advantage: bool = True,
-        il_coef: float = 10.0,  # 0.0 1.0
+        il_coef: float = 1.0,  # 0.0 1.0
         ent_coef: float = 0.0,  # 0.0
-        vf_coef: float = 0.005,  # 0.5 0.005
+        vf_coef: float = 2e-4,  # 0.5 0.005 2e-4
         max_grad_norm: float = 0.5,
         use_sde: bool = False,
         sde_sample_freq: int = -1,
@@ -95,7 +108,11 @@ class IL_PPO(PPO):
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
     ):
-        n_epochs = n_IL_epochs + n_RL_epochs
+        # n_epochs = n_IL_epochs + n_RL_epochs
+
+        self.future_num_frames = future_num_frames
+
+        assert self.future_num_frames > 1, "Future num frames should be more than 1 in prediction networks!"
         super().__init__(
             policy,
             env,
@@ -126,11 +143,25 @@ class IL_PPO(PPO):
         # if env_config_path is None:
         #     return
 
+        self.weights_scaling = th.tensor(weights_scaling).to(self.device)
         self.criterion = criterion
         self.il_coef = il_coef
         self.n_IL_epochs = n_IL_epochs
         self.n_RL_epochs = n_RL_epochs
+        self.n_epochs = n_epochs
+
+        # num_targets = self.action_space.shape[0] * (self.future_num_frames - 1)
+        # self.policy.pred_net = nn.Linear(self.policy.action_net.in_features, out_features=num_targets).to(self.policy.device)
+        # print(self.policy.pred_net)
         
+    def _setup_model(self) -> None:
+        super()._setup_model()
+        num_targets = self.action_space.shape[0] * (self.future_num_frames - 1)
+        # num_targets = self.action_space.shape[0] * self.future_num_frames
+        self.policy.pred_net = nn.Linear(self.policy.action_net.in_features, out_features=num_targets).to(self.policy.device)
+        # self.policy.pred_net = nn.Linear(self.policy.features_extractor._features_dim, out_features=num_targets).to(self.policy.device)
+
+        self.policy.optimizer = self.policy.optimizer_class(self.policy.parameters(), lr=self.lr_schedule(1), **self.policy.optimizer_kwargs)
 
     def train(self) -> None:
         """
@@ -147,51 +178,55 @@ class IL_PPO(PPO):
             clip_range_vf = self.clip_range_vf(self._current_progress_remaining)
 
         entropy_losses = []
-        il_losses, pg_losses, value_losses = [], [], []
+        IL_losses, RL_losses, pg_losses, value_losses = [], [], [], []
         clip_fractions = []
 
         continue_training = True
 
-        # ==== train for n_RL_epochs epochs ====
-        for epoch in range(self.n_RL_epochs):
+        # ==== train for n_epochs epochs ====
+        for epoch in range(self.n_epochs):
+        # # ==== train for n_RL_epochs epochs ====
+        # for epoch in range(self.n_RL_epochs):
             
+            # ==== one RL train epoch ====
             approx_kl_divs = []
             # Do a complete pass on the rollout buffer
             for rollout_data in self.rollout_buffer.get(self.batch_size):
-                # ===== Imitation learning data for iteration =====
-                il_data_buffer = get_data()
-                # get dataset observations
-                il_obs = {'image': il_data_buffer["image"]}
-                # get action_net actions distributions
-                il_actions_dist = self.policy.get_distribution(il_obs)
-                # get action_net actions
+                # # ===== Imitation learning data for iteration =====
+                # il_data_buffer = get_data()
+                # # get dataset observations
+                # il_obs = {'image': il_data_buffer["image"]}
+                # # get action_net actions distributions
+                # il_actions_dist = self.policy.get_distribution(il_obs)
+                # # get action_net actions
                 # il_actions = il_actions_dist.mode()
-                il_actions = il_actions_dist.get_actions()
+                # # il_actions = il_actions_dist.get_actions()
 
-                # get target actions and compute imitation loss
-                xy = il_data_buffer["target_positions"]
-                yaw = il_data_buffer["target_yaws"]
-                # if self.normalize_targets:
-                #     xy /= self.xy_scale
-                target_actions = th.cat((xy, yaw), dim=-1)
-                # get resacle params and rescale the targets
-                rescale_action = self.env.get_attr('rescale_action')[0]
-                use_kinematic = self.env.get_attr('use_kinematic')[0]
-                if rescale_action:
-                    if use_kinematic:
-                        kin_rescale = self.env.get_attr('kin_rescale')[0]
-                        target_actions[..., 0] = target_actions[..., 0] / kin_rescale.steer_scale
-                        target_actions[..., 1] = target_actions[..., 1] / kin_rescale.acc_scale
-                    else:
-                        non_kin_rescale = self.env.get_attr('non_kin_rescale')[0]
-                        target_actions[..., 0] = (target_actions[..., 0] - non_kin_rescale.x_mu) / non_kin_rescale.x_scale
-                        target_actions[..., 1] = (target_actions[..., 1] - non_kin_rescale.y_mu) / non_kin_rescale.y_scale
-                        target_actions[..., 2] = (target_actions[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
-                # target_weights = data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling
-                # t = self.criterion(il_actions, target_actions.squeeze(1))
-                il_loss = th.mean(self.criterion(il_actions, target_actions.squeeze(1)))  # * target_weights)
-                il_losses.append(il_loss.item())
+                # # get target actions and compute imitation loss
+                # xy = il_data_buffer["target_positions"][..., 0, :]
+                # yaw = il_data_buffer["target_yaws"][..., 0, :]
+                # # if self.normalize_targets:
+                # #     xy /= self.xy_scale
+                # target_actions = th.cat((xy, yaw), dim=-1)
+                # # get resacle params and rescale the targets
+                # rescale_action = self.env.get_attr('rescale_action')[0]
+                # use_kinematic = self.env.get_attr('use_kinematic')[0]
+                # if rescale_action:
+                #     if use_kinematic:
+                #         kin_rescale = self.env.get_attr('kin_rescale')[0]
+                #         target_actions[..., 0] = target_actions[..., 0] / kin_rescale.steer_scale
+                #         target_actions[..., 1] = target_actions[..., 1] / kin_rescale.acc_scale
+                #     else:
+                #         non_kin_rescale = self.env.get_attr('non_kin_rescale')[0]
+                #         target_actions[..., 0] = (target_actions[..., 0] - non_kin_rescale.x_mu) / non_kin_rescale.x_scale
+                #         target_actions[..., 1] = (target_actions[..., 1] - non_kin_rescale.y_mu) / non_kin_rescale.y_scale
+                #         target_actions[..., 2] = (target_actions[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
+                # # target_weights = data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling
+                # # t = self.criterion(il_actions, target_actions.squeeze(1))
+                # il_loss = th.mean(self.criterion(il_actions, target_actions.squeeze(1)))  # * target_weights)
 
+                if epoch >= self.n_RL_epochs:
+                    break
                 actions = rollout_data.actions
                 if isinstance(self.action_space, spaces.Discrete):
                     # Convert discrete action from float to long
@@ -244,9 +279,10 @@ class IL_PPO(PPO):
 
                 entropy_losses.append(entropy_loss.item())
 
-                # loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss  # PPO
-                # loss = self.il_coef * il_loss + policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss  # ILPPO
-                loss = self.il_coef * il_loss + 0.0*(policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss)  # IL
+                RL_loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss  # PPO
+                # RL_loss = self.il_coef * il_loss + policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss  # ILPPO
+                # RL_loss = self.il_coef * il_loss + 0.0*(policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss)  # IL
+                RL_losses.append(RL_loss.item())
 
                 # Calculate approximate form of reverse KL Divergence for early stopping
                 # see issue #417: https://github.com/DLR-RM/stable-baselines3/issues/417
@@ -265,40 +301,15 @@ class IL_PPO(PPO):
 
                 # Optimization step
                 self.policy.optimizer.zero_grad()
-                loss.backward()
+                RL_loss.backward()
                 # Clip grad norm
                 th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
+            
 
-            if not continue_training:
-                break
-            
-            self._n_updates += 1
-            explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
-            # Logs
-            self.logger.record("train/imitation_loss", np.mean(il_losses))
-            self.logger.record("train/entropy_loss", np.mean(entropy_losses))
-            self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
-            self.logger.record("train/value_loss", np.mean(value_losses))
-            self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
-            self.logger.record("train/clip_fraction", np.mean(clip_fractions))
-            self.logger.record("train/loss", loss.item())
-            self.logger.record("train/explained_variance", explained_var)
-            if hasattr(self.policy, "log_std"):
-                self.logger.record("train/std", th.exp(self.policy.log_std).mean().item())
 
-            self.logger.record("train/n_updates", self._n_updates)
-            self.logger.record("train/clip_range", clip_range)
-            if self.clip_range_vf is not None:
-                self.logger.record("train/clip_range_vf", clip_range_vf)
-            
-            self.logger.dump(step=self._n_updates)
-        
-        # ==== train for n_IL_epochs epochs ====
-        for epoch in range(self.n_IL_epochs):
-            
-            # Do a complete pass on the rollout buffer
-            for _ in range(4):
+            # ==== one Pred IL train epoch ====
+            for _ in range(int(self.rollout_buffer.buffer_size/self.batch_size)):  # 1 int(self.rollout_buffer.buffer_size/self.batch_size)
                 # ===== Imitation learning data for iteration =====
                 il_data_buffer = get_data()
                 # get dataset observations
@@ -307,14 +318,20 @@ class IL_PPO(PPO):
                 il_actions_dist = self.policy.get_distribution(il_obs)
                 # get action_net actions
                 # il_actions = il_actions_dist.mode()
-                il_actions = il_actions_dist.get_actions()
+                il_actions = il_actions_dist.get_actions(deterministic=True)
+                pred_actions = self.policy.pred_traj(il_obs)
+                traj_actions = th.cat((il_actions, pred_actions), dim=-1)
+                # pred_actions = self.policy.pred_traj1(il_obs)
+                # traj_actions = pred_actions
+
+                # traj_actions = traj_actions.view(pred_actions.shape[0], self.future_num_frames, -1)
 
                 # get target actions and compute imitation loss
                 xy = il_data_buffer["target_positions"]
                 yaw = il_data_buffer["target_yaws"]
                 # if self.normalize_targets:
                 #     xy /= self.xy_scale
-                target_actions = th.cat((xy, yaw), dim=-1)
+                target_actions = th.cat((xy, yaw), dim=-1).view(il_actions.shape[0], -1)
                 # get resacle params and rescale the targets
                 rescale_action = self.env.get_attr('rescale_action')[0]
                 use_kinematic = self.env.get_attr('use_kinematic')[0]
@@ -330,50 +347,65 @@ class IL_PPO(PPO):
                         target_actions[..., 2] = (target_actions[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
                 # target_weights = data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling
                 # t = self.criterion(il_actions, target_actions.squeeze(1))
-                il_loss = th.mean(self.criterion(il_actions, target_actions.squeeze(1)))  # * target_weights)
-                il_losses.append(il_loss.item())
+                # [batch_size, num_steps]
+                target_weights = (il_data_buffer["target_availabilities"].unsqueeze(-1) * self.weights_scaling).view(
+                    target_actions.shape[0], -1
+                    )
+                pred_loss = th.mean(self.criterion(traj_actions, target_actions) * target_weights)
 
-                loss = self.il_coef * il_loss  # IL
+                IL_loss = self.il_coef * pred_loss  # IL
+                IL_losses.append(IL_loss.item())
 
                 # Optimization step
                 self.policy.optimizer.zero_grad()
-                loss.backward()
+                IL_loss.backward()
                 # Clip grad norm
                 th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
-
+            
+                
             if not continue_training:
                 break
 
-            self._n_updates += 1
+
+            explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
             # Logs
-            self.logger.record("train/imitation_loss", np.mean(il_losses))
-            self.logger.record("train/loss", loss.item())
+            # self.logger.record("train/imitation_loss", np.mean(il_losses))
+            self.logger.record("train/entropy_loss", np.mean(entropy_losses))
+            self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
+            self.logger.record("train/value_loss", np.mean(value_losses))
+            self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
+            self.logger.record("train/clip_fraction", np.mean(clip_fractions))
+            self.logger.record("train/IL_loss", IL_loss.item())
+            self.logger.record("train/IL_loss_mean", np.mean(IL_losses))
+            self.logger.record("train/RL_loss", RL_loss.item())
+            self.logger.record("train/RL_loss_mean", np.mean(RL_losses))
+
+            self.logger.record("train/explained_variance", explained_var)
+            if hasattr(self.policy, "log_std"):
+                self.logger.record("train/std", th.exp(self.policy.log_std).mean().item())
 
             self.logger.record("train/n_updates", self._n_updates)
+            self.logger.record("train/clip_range", clip_range)
+            if self.clip_range_vf is not None:
+                self.logger.record("train/clip_range_vf", clip_range_vf)
 
+            # Logs
+            # self.logger.record("train/imitation_loss", np.mean(il_losses))
+            # self.logger.record("train/loss", loss.item())
+            # self.logger.record("train/n_updates", self._n_updates)
+            
             self.logger.dump(step=self._n_updates)
+        
 
+            # ==== save the model ====
+            # from pred_ppo_training import MODEL_PATH
+            if self._n_updates % 250 == 0:
+                model_path = f"{os.getcwd()}/models_" + os.environ["DATE"] + f"/{self._n_updates}.pt"  # pt zip
+                self.save(model_path)
 
-        # self._n_updates += self.n_epochs
-        # explained_var = explained_variance(self.rollout_buffer.values.flatten(), self.rollout_buffer.returns.flatten())
+            self._n_updates += 1
 
-        # # Logs
-        # self.logger.record("train/imitation_loss", np.mean(il_losses))
-        # self.logger.record("train/entropy_loss", np.mean(entropy_losses))
-        # self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
-        # self.logger.record("train/value_loss", np.mean(value_losses))
-        # self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
-        # self.logger.record("train/clip_fraction", np.mean(clip_fractions))
-        # self.logger.record("train/loss", loss.item())
-        # self.logger.record("train/explained_variance", explained_var)
-        # if hasattr(self.policy, "log_std"):
-        #     self.logger.record("train/std", th.exp(self.policy.log_std).mean().item())
-
-        # self.logger.record("train/n_updates", self._n_updates)
-        # self.logger.record("train/clip_range", clip_range)
-        # if self.clip_range_vf is not None:
-        #     self.logger.record("train/clip_range_vf", clip_range_vf)
 
     def learn(
         self: SelfPPO,

@@ -7,7 +7,7 @@ model_params:
   model_architecture: "resnet50"
 
   history_num_frames: 1
-  future_num_frames: 1  # 1 12
+  future_num_frames: 12  # 1 12
   step_time: 0.1
   render_ego_history: True
   load_pretrained: False

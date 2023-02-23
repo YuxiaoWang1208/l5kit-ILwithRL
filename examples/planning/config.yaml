@@ -7,7 +7,7 @@ model_params:
   model_architecture: "resnet50"
 
   history_num_frames: 1  # 0
-  future_num_frames: 12
+  future_num_frames: 12  # 12
   step_time: 0.1
   render_ego_history: True
 
@@ -50,21 +50,30 @@ raster_params:
 ###################
 ## Data loader options
 train_data_loader:
-  key: "scenes/train.zarr"
-  batch_size: 12
+  key: "scenes/sample.zarr"  # train
+  batch_size: 16  # 12
   shuffle: True
-  num_workers: 16
+  num_workers: 4  #16
   perturb_probability: 0.5
 
 val_data_loader:
-  key: "scenes/validate.zarr"
-  batch_size: 12
+  key: "scenes/sample.zarr"  # validate
+  batch_size: 16  # 12
   shuffle: False
-  num_workers: 16
+  num_workers: 4  # 16
+
+###################
+## Gym params
+gym_params:
+  max_scene_id: 100  # 100 1
+  max_val_scene_id: 100  # 100 1
+  randomize_start_frame: True  # False
+  overfit: True  # 强制限定一个场景id 过拟合
+  overfit_id: 39  # 路口弯道
 
 ###################
 ## Train params
 train_params:
   checkpoint_every_n_steps: 10000
-  max_num_steps: 5
+  max_num_steps: 100000
   eval_every_n_steps: 10000

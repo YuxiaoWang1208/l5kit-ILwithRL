@@ -13,6 +13,8 @@ class RasterizedPlanningModel(nn.Module):
 
     def __init__(
         self,
+        rescale_action,
+        use_kinematic,
         model_arch: str,
         num_input_channels: int,
         num_targets: int,
@@ -60,8 +62,10 @@ class RasterizedPlanningModel(nn.Module):
                 padding=(3, 3),
                 bias=False,
             )
+        self.rescale_action = rescale_action
+        self.use_kinematic = use_kinematic
 
-    def forward(self, data_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def forward(self, data_batch: Dict[str, torch.Tensor], rescale_paras: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         # [batch_size, channels, height, width]
         image_batch = data_batch["image"]
         # [batch_size, num_steps * 2]
@@ -76,11 +80,32 @@ class RasterizedPlanningModel(nn.Module):
             targets = (torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2)).view(
                 batch_size, -1
             )
+            # get resacle params and rescale the targets
+            if self.rescale_action:
+                if self.use_kinematic:
+                    targets[..., 0] = targets[..., 0] / rescale_paras["steer_scale"]
+                    targets[..., 1] = targets[..., 1] / rescale_paras["acc_scale"]
+                else:
+                    targets[..., 0] = (targets[..., 0] - rescale_paras["x_mu"]) / rescale_paras["x_scale"]
+                    targets[..., 1] = (targets[..., 1] - rescale_paras["y_mu"]) / rescale_paras["y_scale"]
+                    targets[..., 2] = (targets[..., 2] - rescale_paras["yaw_mu"]) / rescale_paras["yaw_scale"]
             # [batch_size, num_steps]
             target_weights = (data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling).view(
                 batch_size, -1
             )
             loss = torch.mean(self.criterion(outputs, targets) * target_weights)
+            # print(loss)
+            # loss = torch.mean(self.criterion(outputs, targets))
+            # print(loss)
+            # targets = (torch.cat((data_batch["target_positions"], data_batch["target_yaws"]), dim=2))
+            # outputs = outputs.view(batch_size, -1, 3)
+            # target_weights = (data_batch["target_availabilities"].unsqueeze(-1) * self.weights_scaling)
+            # loss = torch.mean(self.criterion(outputs, targets) * target_weights)
+            # print(loss)
+            # loss = torch.mean(self.criterion(outputs, targets))
+            # print(loss)
+
+
             train_dict = {"loss": loss}
             return train_dict
         else:
@@ -91,3 +116,11 @@ class RasterizedPlanningModel(nn.Module):
             pred_yaws = predicted[:, :, 2:3]
             eval_dict = {"positions": pred_positions, "yaws": pred_yaws}
             return eval_dict
+        
+    def predict(self, image_batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        # [batch_size, num_steps * 2]
+        outputs = self.model(image_batch)
+        batch_size = len(image_batch)
+
+        predicted = outputs.view(batch_size, -1, 3)
+        return predicted

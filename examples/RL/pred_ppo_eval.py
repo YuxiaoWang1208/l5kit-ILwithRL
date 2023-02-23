@@ -20,6 +20,9 @@ from l5kit.environment.envs.l5_env import SimulationConfigGym
 from l5kit.environment.feature_extractor import CustomFeatureExtractor
 from l5kit.environment.callbacks import L5KitEvalCallback
 
+from l5kit.planning.rasterized.model import RasterizedPlanningModel
+from l5kit.configs import load_config_data
+
 # Dataset is assumed to be on the folder specified
 # in the L5KIT_DATA_FOLDER environment variable
 # Please set the L5KIT_DATA_FOLDER environment variable
@@ -28,15 +31,15 @@ os.chdir("/root/zhufenghua12/wangyuxiao/l5kit-wyx/examples/RL")
 if "L5KIT_DATA_FOLDER" not in os.environ:
     raise KeyError("L5KIT_DATA_FOLDER environment variable not set")
 
-config_path = os.getcwd() + "/gym_config.yaml"
+config_path = os.getcwd() + "/pred_ppo_config.yaml"
 os.environ.setdefault('CONFIG_PATH', config_path)
 
-from il_ppo import IL_PPO
+from pred_ppo import PRED_PPO
 from get_il_data import get_frame_data
 
 
-date = "2023-02-15_19-50"  # "2023-02-13_10-46"
-steps = "300000"  # "120000" the first time to turn to the right direction!!!
+date = "2023-02-23_16-44"  # "2023-02-13_10-46"
+steps = "2000"  # "120000" the first time to turn to the right direction!!!
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,
@@ -113,13 +116,10 @@ if __name__ == "__main__":
         "normalize_images": False
     }
 
-    # define model
-    clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
-    if args.load is not None:
-        model = IL_PPO.load(args.load, clip_range=clip_schedule, learning_rate=args.lr)
-    else:
-        print("This is evaluation! Please enter model file path.")
-
+    sys.path.append("/root/zhufenghua12/wangyuxiao/l5kit-wyx/examples/RL")
+    from get_il_data import get_frame_data
+    from get_il_data import rasterizer
+    cfg = load_config_data(args.config)
 
     # train
     # model.learn(args.n_steps, callback=[checkpoint_callback, eval_callback])
@@ -132,6 +132,25 @@ if __name__ == "__main__":
                        'train': False, 'sim_cfg': rollout_sim_cfg, 'simnet_model_path': args.simnet_model_path}
     rollout_env = make_vec_env("L5-CLE-v0", env_kwargs=rollout_env_kwargs, n_envs=1,
                             vec_env_cls=SubprocVecEnv, vec_env_kwargs={"start_method": "fork"})
+    
+    rescale_action = rollout_env.get_attr('rescale_action')[0]
+    use_kinematic = rollout_env.get_attr('use_kinematic')[0]
+
+    # define model
+    model_path = "./models_" + str(date) + "/" + str(steps) + ".pt"
+    device = th.device("cpu")
+    clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
+    if args.load is not None:
+        model = PRED_PPO.load(model_path, rollout_env, device=device, clip_range=clip_schedule, learning_rate=args.lr)
+    else:
+        print("This is evaluation! Please enter model file path.")
+
+    # saved_model_state_dict = th.load(model_path).state_dict()
+    # model.load_state_dict(saved_model_state_dict)
+    # model.cpu()
+    # model = model.eval()
+    th.set_grad_enabled(False)
+
     import gym
     from l5kit.visualization.visualizer.zarr_utils import episode_out_to_visualizer_scene_gym_cle
     from l5kit.visualization.visualizer.visualizer import visualize
@@ -141,7 +160,6 @@ if __name__ == "__main__":
     env_config_path = args.config
     map_env = gym.make("L5-CLE-v0", env_config_path=env_config_path, sim_cfg=rollout_sim_cfg, \
                         use_kinematic=True, train=False, return_info=True)
-
 
     def rollout_episode(model, env, idx = 39):  # 18 25 29 50 60 65 75 95
         """Rollout a particular scene index and return the simulation output.
@@ -166,7 +184,7 @@ if __name__ == "__main__":
             data = get_frame_data(n)
             xy = data["target_positions"]
             yaw = data["target_yaws"]
-            action = np.concatenate([xy, yaw], axis=-1)
+            action = np.expand_dims(np.concatenate([xy, yaw], axis=-1)[0], axis=0)
 
             # get resacle params and rescale the targets
             rescale_action = env.get_attr('rescale_action')[0]
@@ -182,13 +200,12 @@ if __name__ == "__main__":
                     action[..., 1] = (action[..., 1] - non_kin_rescale.y_mu) / non_kin_rescale.y_scale
                     action[..., 2] = (action[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
 
-            il_action = th.tensor(action)
+            # il_action = th.tensor(action)
             action, _ = model.predict(obs, deterministic=True)
-            # print(env.get_attr('non_kin_rescale'))
-            rl_action = th.tensor(action)
-            criterion = th.nn.MSELoss(reduction="none")
-            il_loss = th.mean(criterion(il_action, rl_action))
-            print(il_loss)
+            # obs, _ = model.policy.obs_to_tensor(obs)
+            # action = model.policy.pred_traj(obs)[..., 0:3]  # pred_traj1
+            # action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
+            
             obs, _, done, info = env.step(action)
             n += 1
             if done[0]:
@@ -222,3 +239,7 @@ if __name__ == "__main__":
 
     output_notebook()
     visualize_outputs([sim_out], map_API)
+
+
+
+

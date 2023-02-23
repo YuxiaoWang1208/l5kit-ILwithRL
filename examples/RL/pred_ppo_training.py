@@ -25,10 +25,10 @@ os.chdir("/root/zhufenghua12/wangyuxiao/l5kit-wyx/examples/RL")
 if "L5KIT_DATA_FOLDER" not in os.environ:
     raise KeyError("L5KIT_DATA_FOLDER environment variable not set")
 
-config_path = os.getcwd() + "/gym_config.yaml"
+# print(os.environ.keys())
+config_path = os.getcwd() + "/pred_ppo_config.yaml"
 os.environ.setdefault('CONFIG_PATH', config_path)
-
-from il_ppo import IL_PPO
+# print(os.environ["CONFIG_PATH"])
 
 import datetime
 
@@ -36,8 +36,12 @@ d = datetime.datetime.now() + datetime.timedelta(hours=8)
 # date = "0207"
 # print(d.strftime('%Y-%m-%d_%H-%M'))
 date = d.strftime('%Y-%m-%d_%H-%M')
+os.environ.setdefault('DATE', date)
 
-lr = 3e-4  # 3e-4 3e-3
+from pred_ppo import PRED_PPO
+
+
+lr = 3e-4  # 3e-4 1e-3
 from l5kit.configs import load_config_data
 
 
@@ -58,20 +62,22 @@ if __name__ == "__main__":
                         help='Tensorboard log folder')
     parser.add_argument('--save_path', default='./logs_' + date + '/', type=str,
                         help='Folder to save model checkpoints')
-    parser.add_argument('--save_freq', default=10000, type=int,  # 10000
+    parser.add_argument('--save_freq', default=100000, type=int,  # 100000 1000
                         help='Frequency to save model checkpoints')
-    parser.add_argument('--eval_freq', default=10000, type=int,  # 100000 1000
+    parser.add_argument('--eval_freq', default=1000, type=int,  # 10000 1000
                         help='Frequency to evaluate model state')
     parser.add_argument('--n_eval_episodes', default=1, type=int,  # 10
                         help='Number of episodes to evaluate')
     parser.add_argument('--n_steps', default=1000000, type=int,
                         help='Total number of training time steps')
-    parser.add_argument('--num_rollout_steps', default=256, type=int,
+    parser.add_argument('--num_rollout_steps', default=256, type=int,  # 256
                         help='Number of rollout steps per environment per model update')
-    parser.add_argument('--n_IL_epochs', default=50, type=int,
+    parser.add_argument('--n_IL_epochs', default=60, type=int,
                         help='Number of model Imitation training epochs per update')
-    parser.add_argument('--n_RL_epochs', default=50, type=int,
+    parser.add_argument('--n_RL_epochs', default=10, type=int,
                         help='Number of model Reinforcement and Imitation training epochs per update')
+    parser.add_argument('--n_epochs', default=50, type=int,
+                        help='Number of model training epochs per update')
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Mini batch size of model update')
     parser.add_argument('--lr', default=lr, type=float,  # 3e-4
@@ -107,6 +113,9 @@ if __name__ == "__main__":
     parser.add_argument('--seed', default=42, type=int)
     args = parser.parse_args()
 
+    # save path
+    args.save_path = f"{os.getcwd()}/models_" + os.environ["DATE"] + "/"
+
     # get config
     cfg = load_config_data(os.environ["CONFIG_PATH"])
     rand = cfg["gym_params"]["randomize_start_frame"]
@@ -125,20 +134,25 @@ if __name__ == "__main__":
                        vec_env_cls=SubprocVecEnv, vec_env_kwargs={"start_method": "fork"})
 
     # Custom Feature Extractor backbone
+    args.model_arch = 'resnet50'
+    pretrained = True
     policy_kwargs = {
         "features_extractor_class": CustomFeatureExtractor,
-        "features_extractor_kwargs": {"features_dim": args.features_dim, "model_arch": args.model_arch},
+        "features_extractor_kwargs": {"features_dim": args.features_dim, "model_arch": args.model_arch, "pretrained": pretrained},
         "normalize_images": False
     }
 
     # define model
     clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
     if args.load is not None:
-        model = IL_PPO.load(args.load, env, clip_range=clip_schedule, learning_rate=args.lr)
+        model = PRED_PPO.load(args.load, env, clip_range=clip_schedule, learning_rate=args.lr)
     else:
-        model = IL_PPO("MultiInputPolicy", env, policy_kwargs=policy_kwargs, verbose=1, n_steps=args.num_rollout_steps,
-                    learning_rate=args.lr, gamma=args.gamma, tensorboard_log=args.tb_log, n_IL_epochs=args.n_IL_epochs,
+        model = PRED_PPO("MultiInputPredPolicy", env, future_num_frames=cfg['model_params']['future_num_frames'],
+                    policy_kwargs=policy_kwargs, verbose=1, n_steps=args.num_rollout_steps,
+                    learning_rate=args.lr, gamma=args.gamma, tensorboard_log=args.tb_log,
+                    # n_IL_epochs=args.n_IL_epochs, 
                     n_RL_epochs=args.n_RL_epochs,
+                    n_epochs = args.n_epochs, weights_scaling=[1., 1., 1.],
                     clip_range=clip_schedule, batch_size=args.batch_size, seed=args.seed, gae_lambda=args.gae_lambda)
 
     # make eval env

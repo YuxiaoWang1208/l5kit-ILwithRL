@@ -28,15 +28,15 @@ os.chdir("/root/zhufenghua12/wangyuxiao/l5kit-wyx/examples/RL")
 if "L5KIT_DATA_FOLDER" not in os.environ:
     raise KeyError("L5KIT_DATA_FOLDER environment variable not set")
 
-config_path = os.getcwd() + "/gym_config.yaml"
+config_path = os.getcwd() + "/pred_ppo_config.yaml"
 os.environ.setdefault('CONFIG_PATH', config_path)
 
-from il_ppo import IL_PPO
+from pred_ppo import PRED_PPO
 from get_il_data import get_frame_data
 
 
-date = "2023-02-15_19-50"  # "2023-02-13_10-46"
-steps = "300000"  # "120000" the first time to turn to the right direction!!!
+date = "2023-02-22_12-19"  # "2023-02-13_10-46"
+steps = "500"  # "120000" the first time to turn to the right direction!!!
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,
@@ -107,19 +107,13 @@ if __name__ == "__main__":
         raise ValueError("simnet_model_path needs to be provided when using simnet")
 
     # Custom Feature Extractor backbone
+    args.model_arch = 'resnet50'
+    pretrained = True
     policy_kwargs = {
         "features_extractor_class": CustomFeatureExtractor,
-        "features_extractor_kwargs": {"features_dim": args.features_dim, "model_arch": args.model_arch},
+        "features_extractor_kwargs": {"features_dim": args.features_dim, "model_arch": args.model_arch, "pretrained": pretrained},
         "normalize_images": False
     }
-
-    # define model
-    clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
-    if args.load is not None:
-        model = IL_PPO.load(args.load, clip_range=clip_schedule, learning_rate=args.lr)
-    else:
-        print("This is evaluation! Please enter model file path.")
-
 
     # train
     # model.learn(args.n_steps, callback=[checkpoint_callback, eval_callback])
@@ -132,6 +126,14 @@ if __name__ == "__main__":
                        'train': False, 'sim_cfg': rollout_sim_cfg, 'simnet_model_path': args.simnet_model_path}
     rollout_env = make_vec_env("L5-CLE-v0", env_kwargs=rollout_env_kwargs, n_envs=1,
                             vec_env_cls=SubprocVecEnv, vec_env_kwargs={"start_method": "fork"})
+    
+     # define model
+    clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
+    if args.load is not None:
+        model = PRED_PPO.load(args.load, rollout_env, clip_range=clip_schedule, learning_rate=args.lr)
+    else:
+        print("This is evaluation! Please enter model file path.")
+
     import gym
     from l5kit.visualization.visualizer.zarr_utils import episode_out_to_visualizer_scene_gym_cle
     from l5kit.visualization.visualizer.visualizer import visualize
@@ -166,7 +168,7 @@ if __name__ == "__main__":
             data = get_frame_data(n)
             xy = data["target_positions"]
             yaw = data["target_yaws"]
-            action = np.concatenate([xy, yaw], axis=-1)
+            action = np.expand_dims(np.concatenate([xy, yaw], axis=-1)[0], axis=0)
 
             # get resacle params and rescale the targets
             rescale_action = env.get_attr('rescale_action')[0]
@@ -182,13 +184,12 @@ if __name__ == "__main__":
                     action[..., 1] = (action[..., 1] - non_kin_rescale.y_mu) / non_kin_rescale.y_scale
                     action[..., 2] = (action[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
 
-            il_action = th.tensor(action)
+            # il_action = th.tensor(action)
             action, _ = model.predict(obs, deterministic=True)
-            # print(env.get_attr('non_kin_rescale'))
-            rl_action = th.tensor(action)
-            criterion = th.nn.MSELoss(reduction="none")
-            il_loss = th.mean(criterion(il_action, rl_action))
-            print(il_loss)
+            # rl_action = th.tensor(action)
+            # criterion = th.nn.MSELoss(reduction="none")
+            # il_loss = th.mean(criterion(il_action, rl_action))
+            # print(il_loss)
             obs, _, done, info = env.step(action)
             n += 1
             if done[0]:
