@@ -96,7 +96,7 @@ class PRED_PPO(PPO):
         normalize_advantage: bool = True,
         il_coef: float = 1.0,  # 0.0 1.0
         ent_coef: float = 0.0,  # 0.0
-        vf_coef: float = 2e-4,  # 0.5 0.005 2e-4
+        vf_coef: float = 0.5,  # 0.5 0.005 2e-4
         max_grad_norm: float = 0.5,
         use_sde: bool = False,
         sde_sample_freq: int = -1,
@@ -156,8 +156,8 @@ class PRED_PPO(PPO):
         
     def _setup_model(self) -> None:
         super()._setup_model()
-        num_targets = self.action_space.shape[0] * (self.future_num_frames - 1)
-        # num_targets = self.action_space.shape[0] * self.future_num_frames
+        # num_targets = self.action_space.shape[0] * (self.future_num_frames - 1)
+        num_targets = self.action_space.shape[0] * self.future_num_frames
         self.policy.pred_net = nn.Linear(self.policy.action_net.in_features, out_features=num_targets).to(self.policy.device)
         # self.policy.pred_net = nn.Linear(self.policy.features_extractor._features_dim, out_features=num_targets).to(self.policy.device)
 
@@ -191,7 +191,7 @@ class PRED_PPO(PPO):
             # ==== one RL train epoch ====
             approx_kl_divs = []
             # Do a complete pass on the rollout buffer
-            for rollout_data in self.rollout_buffer.get(self.batch_size):
+            '''for rollout_data in self.rollout_buffer.get(self.batch_size):
                 # # ===== Imitation learning data for iteration =====
                 # il_data_buffer = get_data()
                 # # get dataset observations
@@ -225,8 +225,8 @@ class PRED_PPO(PPO):
                 # # t = self.criterion(il_actions, target_actions.squeeze(1))
                 # il_loss = th.mean(self.criterion(il_actions, target_actions.squeeze(1)))  # * target_weights)
 
-                if epoch >= self.n_RL_epochs:
-                    break
+                # if epoch >= self.n_RL_epochs:
+                #     break
                 actions = rollout_data.actions
                 if isinstance(self.action_space, spaces.Discrete):
                     # Convert discrete action from float to long
@@ -280,9 +280,11 @@ class PRED_PPO(PPO):
                 entropy_losses.append(entropy_loss.item())
 
                 RL_loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss  # PPO
+                # RL_loss = self.ent_coef * entropy_loss + self.vf_coef * value_loss  # no policy PPO
                 # RL_loss = self.il_coef * il_loss + policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss  # ILPPO
                 # RL_loss = self.il_coef * il_loss + 0.0*(policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss)  # IL
                 RL_losses.append(RL_loss.item())
+                V_loss = self.vf_coef * value_loss
 
                 # Calculate approximate form of reverse KL Divergence for early stopping
                 # see issue #417: https://github.com/DLR-RM/stable-baselines3/issues/417
@@ -299,13 +301,22 @@ class PRED_PPO(PPO):
                         print(f"Early stopping at step {epoch} due to reaching max kl: {approx_kl_div:.2f}")
                     break
 
+                if epoch >= self.n_RL_epochs:
+                    # Optimize only Value net
+                    self.policy.optimizer.zero_grad()
+                    V_loss.backward()
+                    # Clip grad norm
+                    th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                    self.policy.optimizer.step()
+                    continue
+
                 # Optimization step
                 self.policy.optimizer.zero_grad()
                 RL_loss.backward()
                 # Clip grad norm
                 th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
-            
+            '''
 
 
             # ==== one Pred IL train epoch ====
@@ -320,9 +331,9 @@ class PRED_PPO(PPO):
                 # il_actions = il_actions_dist.mode()
                 il_actions = il_actions_dist.get_actions(deterministic=True)
                 pred_actions = self.policy.pred_traj(il_obs)
-                traj_actions = th.cat((il_actions, pred_actions), dim=-1)
+                # traj_actions = th.cat((il_actions, pred_actions), dim=-1)
                 # pred_actions = self.policy.pred_traj1(il_obs)
-                # traj_actions = pred_actions
+                traj_actions = pred_actions
 
                 # traj_actions = traj_actions.view(pred_actions.shape[0], self.future_num_frames, -1)
 
@@ -378,7 +389,7 @@ class PRED_PPO(PPO):
             self.logger.record("train/clip_fraction", np.mean(clip_fractions))
             self.logger.record("train/IL_loss", IL_loss.item())
             self.logger.record("train/IL_loss_mean", np.mean(IL_losses))
-            self.logger.record("train/RL_loss", RL_loss.item())
+            # self.logger.record("train/RL_loss", RL_loss.item())
             self.logger.record("train/RL_loss_mean", np.mean(RL_losses))
 
             self.logger.record("train/explained_variance", explained_var)

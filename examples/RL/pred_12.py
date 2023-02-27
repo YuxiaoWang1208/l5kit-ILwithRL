@@ -117,7 +117,7 @@ class PRED_12(PPO):
 
         self.future_num_frames = future_num_frames
 
-        assert self.future_num_frames > 1, "Future num frames should be more than 1 in prediction networks!"
+        # assert self.future_num_frames > 1, "Future num frames should be more than 1 in prediction networks!"
         super().__init__(
             policy,
             env,
@@ -403,7 +403,7 @@ class PRED_12(PPO):
             # ==== save the model ====
             # from pred_12_training import MODEL_PATH
             if self._n_updates % 250 == 0:
-                model_path = f"{os.getcwd()}/models_" + "net" + f"/{self._n_updates}.pt"  # pt zip
+                model_path = f"{os.getcwd()}/models_" + "net3" + f"/{self._n_updates}.pt"  # pt zip
                 self.save(model_path)
 
             self._n_updates += 1

@@ -38,8 +38,8 @@ from pred_ppo import PRED_PPO
 from get_il_data import get_frame_data
 
 
-date = "2023-02-23_16-44"  # "2023-02-13_10-46"
-steps = "2000"  # "120000" the first time to turn to the right direction!!!
+date = "2023-02-24_20-42"  # "2023-02-13_10-46"
+steps = "1000"  # "120000" the first time to turn to the right direction!!!
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,
@@ -119,6 +119,7 @@ if __name__ == "__main__":
     sys.path.append("/root/zhufenghua12/wangyuxiao/l5kit-wyx/examples/RL")
     from get_il_data import get_frame_data
     from get_il_data import rasterizer
+    args.config = os.environ["CONFIG_PATH"]
     cfg = load_config_data(args.config)
 
     # train
@@ -129,7 +130,8 @@ if __name__ == "__main__":
     rollout_sim_cfg.num_simulation_steps = None
     rollout_sim_cfg.use_agents_gt = (not args.simnet)
     rollout_env_kwargs = {'env_config_path': args.config, 'use_kinematic': args.kinematic, 'return_info': True,
-                       'train': False, 'sim_cfg': rollout_sim_cfg, 'simnet_model_path': args.simnet_model_path}
+                       'train': False, 'sim_cfg': rollout_sim_cfg, 'simnet_model_path': args.simnet_model_path,
+                       'randomize_start': False}
     rollout_env = make_vec_env("L5-CLE-v0", env_kwargs=rollout_env_kwargs, n_envs=1,
                             vec_env_cls=SubprocVecEnv, vec_env_kwargs={"start_method": "fork"})
     
@@ -150,6 +152,7 @@ if __name__ == "__main__":
     # model.cpu()
     # model = model.eval()
     th.set_grad_enabled(False)
+    model.policy.set_training_mode(False)
 
     import gym
     from l5kit.visualization.visualizer.zarr_utils import episode_out_to_visualizer_scene_gym_cle
@@ -180,35 +183,40 @@ if __name__ == "__main__":
         done = False
 
         n = 1
+        rew_ep = []
         while True:
-            data = get_frame_data(n)
-            xy = data["target_positions"]
-            yaw = data["target_yaws"]
-            action = np.expand_dims(np.concatenate([xy, yaw], axis=-1)[0], axis=0)
+            # data = get_frame_data(n)
+            # xy = data["target_positions"]
+            # yaw = data["target_yaws"]
+            # action = np.expand_dims(np.concatenate([xy, yaw], axis=-1)[0], axis=0)
 
-            # get resacle params and rescale the targets
-            rescale_action = env.get_attr('rescale_action')[0]
-            use_kinematic = env.get_attr('use_kinematic')[0]
-            if rescale_action:
-                if use_kinematic:
-                    kin_rescale = env.get_attr('kin_rescale')[0]
-                    action[..., 0] = action[..., 0] / kin_rescale.steer_scale
-                    action[..., 1] = action[..., 1] / kin_rescale.acc_scale
-                else:
-                    non_kin_rescale = env.get_attr('non_kin_rescale')[0]
-                    action[..., 0] = (action[..., 0] - non_kin_rescale.x_mu) / non_kin_rescale.x_scale
-                    action[..., 1] = (action[..., 1] - non_kin_rescale.y_mu) / non_kin_rescale.y_scale
-                    action[..., 2] = (action[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
+            # # get resacle params and rescale the targets
+            # rescale_action = env.get_attr('rescale_action')[0]
+            # use_kinematic = env.get_attr('use_kinematic')[0]
+            # if rescale_action:
+            #     if use_kinematic:
+            #         kin_rescale = env.get_attr('kin_rescale')[0]
+            #         action[..., 0] = action[..., 0] / kin_rescale.steer_scale
+            #         action[..., 1] = action[..., 1] / kin_rescale.acc_scale
+            #     else:
+            #         non_kin_rescale = env.get_attr('non_kin_rescale')[0]
+            #         action[..., 0] = (action[..., 0] - non_kin_rescale.x_mu) / non_kin_rescale.x_scale
+            #         action[..., 1] = (action[..., 1] - non_kin_rescale.y_mu) / non_kin_rescale.y_scale
+            #         action[..., 2] = (action[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
 
-            # il_action = th.tensor(action)
             action, _ = model.predict(obs, deterministic=True)
-            # obs, _ = model.policy.obs_to_tensor(obs)
-            # action = model.policy.pred_traj(obs)[..., 0:3]  # pred_traj1
-            # action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
+
+            obs, _ = model.policy.obs_to_tensor(obs)
+            action = model.policy.pred_traj(obs)[..., 0:3]  # pred_traj1
+            action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
             
-            obs, _, done, info = env.step(action)
+            obs, rew, done, info = env.step(action)
+            print(n)
+            # print("reward:", rew)
+            rew_ep.append(rew)
             n += 1
             if done[0]:
+                # print("mean rewards:", np.mean(rew_ep))
                 break
 
         # The episode outputs are present in the key "sim_outs"

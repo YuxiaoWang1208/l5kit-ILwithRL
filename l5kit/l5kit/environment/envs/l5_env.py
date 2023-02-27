@@ -252,6 +252,7 @@ class L5Env(gym.Env):
 
         # Only output the image attribute
         obs = {'image': ego_input[0]["image"]}
+        # print(self.scene_index)
         return obs
 
     def step(self, action: np.ndarray) -> GymStepOutput:

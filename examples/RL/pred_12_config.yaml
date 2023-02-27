@@ -7,7 +7,7 @@ model_params:
   model_architecture: "resnet50"
 
   history_num_frames: 1
-  future_num_frames: 12  # 1 12
+  future_num_frames: 1  # 1 12
   step_time: 0.1
   render_ego_history: True
   load_pretrained: False
@@ -55,6 +55,7 @@ train_data_loader:
   # batch_size: 64  # Use the same batch size of RL rollout buffer
   shuffle: True
   num_workers: 4  # 4 16
+  perturbation: True
 
 val_data_loader:
   key: "scenes/sample.zarr"
@@ -62,8 +63,8 @@ val_data_loader:
 ###################
 ## Gym params
 gym_params:
-  max_scene_id: 100  # 100 1
-  max_val_scene_id: 100  # 100 1
+  max_scene_id: 40  # 100 1
+  max_val_scene_id: 40  # 100 1
   randomize_start_frame: True  # False
   overfit: True  # 强制限定一个场景id 过拟合
   overfit_id: 39  # 路口弯道

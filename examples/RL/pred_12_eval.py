@@ -38,7 +38,7 @@ from pred_12 import PRED_12
 from get_il_data import get_frame_data
 
 
-date = "il"  # "2023-02-13_10-46"
+date = "il3"  # "2023-02-13_10-46"
 steps = "1000"  # "120000" the first time to turn to the right direction!!!
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -105,6 +105,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
 
+    args.config = os.environ["CONFIG_PATH"]
+
     # Simnet model
     if args.simnet and (args.simnet_model_path is None):
         raise ValueError("simnet_model_path needs to be provided when using simnet")
@@ -137,7 +139,7 @@ if __name__ == "__main__":
     use_kinematic = rollout_env.get_attr('use_kinematic')[0]
 
     # define model
-    model_path = "./models_net/" + str(steps) + ".pt"
+    model_path = "./models_net3/" + str(steps) + ".pt"
     device = th.device("cpu")
     clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
     if args.load is not None:
@@ -150,6 +152,7 @@ if __name__ == "__main__":
     # model.cpu()
     # model = model.eval()
     th.set_grad_enabled(False)
+    model.policy.set_training_mode(False)
 
     import gym
     from l5kit.visualization.visualizer.zarr_utils import episode_out_to_visualizer_scene_gym_cle
@@ -201,15 +204,30 @@ if __name__ == "__main__":
                     action[..., 2] = (action[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
 
             # il_action = th.tensor(action)
-            action, _ = model.predict(obs, deterministic=True)
+            # action, _ = model.predict(obs, deterministic=True)
             obs, _ = model.policy.obs_to_tensor(obs)
             action = model.policy.pred_traj(obs)[..., 0:3]  # pred_traj1
             action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
-            # rl_action = th.tensor(action)
+
+            # target_actions = th.cat((th.tensor(xy), th.tensor(yaw)), dim=-1).view(1, -1)
+            # target_actions[..., 0] = (target_actions[..., 0] - non_kin_rescale.x_mu) / non_kin_rescale.x_scale
+            # target_actions[..., 1] = (target_actions[..., 1] - non_kin_rescale.y_mu) / non_kin_rescale.y_scale
+            # target_actions[..., 2] = (target_actions[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
+
+            # target_obs = {'image': data["image"]}
+            # target_obs, _ = model.policy.obs_to_tensor(target_obs)
+            # pred_actions = th.tensor(model.policy.pred_traj(target_obs))
             # criterion = th.nn.MSELoss(reduction="none")
-            # il_loss = th.mean(criterion(il_action, rl_action))
-            # print(il_loss)
+            # loss = th.mean(criterion(pred_actions, target_actions))
+            # print(loss)
+            # obs_loss = th.mean(criterion(target_obs['image'], obs['image']))
+            # print(obs_loss)
+
+            
+            # action = model.policy.pred_traj(target_obs)[..., 0:3]
+            # action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
             obs, _, done, info = env.step(action)
+            print(n)
             n += 1
             if done[0]:
                 break

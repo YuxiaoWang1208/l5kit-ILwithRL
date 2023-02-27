@@ -39,7 +39,7 @@ d = datetime.datetime.now() + datetime.timedelta(hours=8)
 # print(d.strftime('%Y-%m-%d_%H-%M'))
 date = d.strftime('%Y-%m-%d_%H-%M')
 
-lr = 3e-4  # 3e-4 1e-3
+lr = 6e-5  # 3e-4 1e-3 6e-5
 from l5kit.configs import load_config_data
 
 
@@ -62,7 +62,7 @@ if __name__ == "__main__":
                         help='Folder to save model checkpoints')
     parser.add_argument('--save_freq', default=10000, type=int,  # 10000
                         help='Frequency to save model checkpoints')
-    parser.add_argument('--eval_freq', default=10000, type=int,  # 100000 1000
+    parser.add_argument('--eval_freq', default=1000, type=int,  # 100000 1000
                         help='Frequency to evaluate model state')
     parser.add_argument('--n_eval_episodes', default=1, type=int,  # 10
                         help='Number of episodes to evaluate')
@@ -114,6 +114,7 @@ if __name__ == "__main__":
     # get config
     cfg = load_config_data(os.environ["CONFIG_PATH"])
     rand = cfg["gym_params"]["randomize_start_frame"]
+    args.config = os.environ["CONFIG_PATH"]
 
     # Simnet model
     if args.simnet and (args.simnet_model_path is None):

@@ -16,6 +16,8 @@ from l5kit.environment.envs.l5_env import SimulationConfigGym
 from l5kit.environment.feature_extractor import CustomFeatureExtractor
 from l5kit.environment.callbacks import L5KitEvalCallback
 
+import torch as th
+
 
 # Dataset is assumed to be on the folder specified
 # in the L5KIT_DATA_FOLDER environment variable
@@ -41,7 +43,7 @@ os.environ.setdefault('DATE', date)
 from pred_ppo import PRED_PPO
 
 
-lr = 3e-4  # 3e-4 1e-3
+lr = 6e-5  # 3e-4 1e-3 6e-5
 from l5kit.configs import load_config_data
 
 
@@ -52,7 +54,7 @@ if __name__ == "__main__":
                         help='Path to L5Kit environment config file')
     parser.add_argument('-o', '--output', type=str, default='PPO',
                         help='File name for saving model states')
-    parser.add_argument('--load', type=str, # default='./logs/PPO_100000_steps.zip',
+    parser.add_argument('--load', type=str, # default='./models',
                         help='Path to load model and continue training')
     parser.add_argument('--simnet', action='store_true',
                         help='Use simnet to control agents')
@@ -62,7 +64,7 @@ if __name__ == "__main__":
                         help='Tensorboard log folder')
     parser.add_argument('--save_path', default='./logs_' + date + '/', type=str,
                         help='Folder to save model checkpoints')
-    parser.add_argument('--save_freq', default=100000, type=int,  # 100000 1000
+    parser.add_argument('--save_freq', default=10000, type=int,  # 100000 1000
                         help='Frequency to save model checkpoints')
     parser.add_argument('--eval_freq', default=1000, type=int,  # 10000 1000
                         help='Frequency to evaluate model state')
@@ -76,7 +78,7 @@ if __name__ == "__main__":
                         help='Number of model Imitation training epochs per update')
     parser.add_argument('--n_RL_epochs', default=10, type=int,
                         help='Number of model Reinforcement and Imitation training epochs per update')
-    parser.add_argument('--n_epochs', default=50, type=int,
+    parser.add_argument('--n_epochs', default=250, type=int,  # 250 50
                         help='Number of model training epochs per update')
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Mini batch size of model update')
@@ -119,6 +121,7 @@ if __name__ == "__main__":
     # get config
     cfg = load_config_data(os.environ["CONFIG_PATH"])
     rand = cfg["gym_params"]["randomize_start_frame"]
+    args.config = os.environ["CONFIG_PATH"]
 
     # Simnet model
     if args.simnet and (args.simnet_model_path is None):
@@ -138,14 +141,19 @@ if __name__ == "__main__":
     pretrained = True
     policy_kwargs = {
         "features_extractor_class": CustomFeatureExtractor,
+        "share_features_extractor": False,  # False
         "features_extractor_kwargs": {"features_dim": args.features_dim, "model_arch": args.model_arch, "pretrained": pretrained},
         "normalize_images": False
     }
 
     # define model
     clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
+
+    model_path = "./models_" + "2023-02-24_10-04" + "/" + "2000" + ".pt"
+    device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
+    clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
     if args.load is not None:
-        model = PRED_PPO.load(args.load, env, clip_range=clip_schedule, learning_rate=args.lr)
+        model = PRED_PPO.load(model_path, env, device=device, clip_range=clip_schedule, learning_rate=args.lr)
     else:
         model = PRED_PPO("MultiInputPredPolicy", env, future_num_frames=cfg['model_params']['future_num_frames'],
                     policy_kwargs=policy_kwargs, verbose=1, n_steps=args.num_rollout_steps,

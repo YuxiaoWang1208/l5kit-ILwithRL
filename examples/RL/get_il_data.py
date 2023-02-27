@@ -30,14 +30,18 @@ n_channels = rasterizer.num_channels()
 loader_key = cfg["train_data_loader"]["key"]
 dataset_zarr = ChunkedDataset(dm.require(loader_key)).open()
 
-# # add perturbation
-# mean_value=np.array([0.0,0.0,0.0])
-# std_value2 = np.array([1, 1, np.pi / 3])
-# AckermanPerturbation2 = AckermanPerturbation(
-#     random_offset_generator=GaussianRandomGenerator(mean=mean_value, std=std_value2), perturb_prob=0.3)
+# add perturbation
+mean_value=np.array([0.0,0.0,0.0])
+std_value2 = np.array([1, 1, np.pi / 3])
+AckermanPerturbation2 = AckermanPerturbation(
+    random_offset_generator=GaussianRandomGenerator(mean=mean_value, std=std_value2), perturb_prob=0.3)
+if cfg['train_data_loader']['perturbation']:
+    perturbation = AckermanPerturbation2
+else:
+    perturbation = None
 # dataset = EgoDataset(cfg, dataset_zarr, rasterizer, perturbation=AckermanPerturbation2)
 
-dataset = EgoDataset(cfg, dataset_zarr, rasterizer)
+dataset = EgoDataset(cfg, dataset_zarr, rasterizer, perturbation=perturbation)
 if cfg["gym_params"]["overfit"]:  # overfit
     scene_index = cfg["gym_params"]["overfit_id"]
     dataset = dataset.get_scene_dataset(scene_index=scene_index)  # 单场景数据集
