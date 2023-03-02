@@ -15,7 +15,7 @@ from l5kit.data import ChunkedDataset, LocalDataManager
 from l5kit.dataset import EgoDataset
 from l5kit.dataset.utils import move_to_device, move_to_numpy
 from l5kit.environment.kinematic_model import KinematicModel, UnicycleModel
-from l5kit.environment.reward import L2DisplacementYawReward, Reward
+from l5kit.environment.reward import CollisionOffroadReward, L2DisplacementYawReward, Reward
 from l5kit.environment.utils import (calculate_non_kinematic_rescale_params, KinematicActionRescaleParams,
                                      NonKinematicActionRescaleParams)
 from l5kit.rasterization import build_rasterizer
@@ -164,7 +164,8 @@ class L5Env(gym.Env):
                                              mode=ClosedLoopSimulatorModes.GYM,
                                              model_agents=simulation_model)
 
-        self.reward = reward if reward is not None else L2DisplacementYawReward()
+        # self.reward = reward if reward is not None else L2DisplacementYawReward()
+        self.reward = CollisionOffroadReward()
 
         self.max_scene_id = cfg["gym_params"]["max_scene_id"]
         if not self.train:
@@ -306,7 +307,13 @@ class L5Env(gym.Env):
                                                 self.agents_ins_outs)
 
         # reward calculation
-        reward = self.reward.get_reward(self.frame_index, [simulated_outputs])
+        # reward = self.reward.get_reward(self.frame_index, [simulated_outputs])
+
+        # new collision and off-road reward calculation
+        frame_ego = self.sim_dataset.rasterise_frame_batch(self.frame_index)
+        frame_agents = self.sim_dataset.rasterise_agents_frame_batch(self.frame_index)
+        frame_agents = [v for v in frame_agents.values()]
+        reward = self.reward.get_reward(frame_ego, frame_agents)
 
         # done is True when episode ends
         done = episode_over
@@ -314,10 +321,14 @@ class L5Env(gym.Env):
         # Optionally we can pass additional info
         # We are using "info" to output rewards and simulated outputs (during evaluation)
         info: Dict[str, Any]
-        info = {'reward_tot': reward["total"], 'reward_dist': reward["distance"], 'reward_yaw': reward["yaw"]}
+        # info = {'reward_tot': reward["total"], 'reward_dist': reward["distance"], 'reward_yaw': reward["yaw"]}
+        # if done and self.return_info:
+        #     info = {"sim_outs": self.get_episode_outputs(), "reward_tot": reward["total"],
+        #             "reward_dist": reward["distance"], "reward_yaw": reward["yaw"]}
+        info = {'reward_tot': reward["total"], 'reward_col': reward["collision"], 'reward_off': reward["off-road"]}
         if done and self.return_info:
             info = {"sim_outs": self.get_episode_outputs(), "reward_tot": reward["total"],
-                    "reward_dist": reward["distance"], "reward_yaw": reward["yaw"]}
+                    "reward_col": reward["collision"], "reward_off": reward["off-road"]}
 
         # Get next obs
         self.frame_index += 1

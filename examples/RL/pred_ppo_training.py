@@ -74,11 +74,11 @@ if __name__ == "__main__":
                         help='Total number of training time steps')
     parser.add_argument('--num_rollout_steps', default=256, type=int,  # 256
                         help='Number of rollout steps per environment per model update')
-    parser.add_argument('--n_IL_epochs', default=60, type=int,
+    parser.add_argument('--n_IL_epochs', default=10, type=int,
                         help='Number of model Imitation training epochs per update')
     parser.add_argument('--n_RL_epochs', default=10, type=int,
                         help='Number of model Reinforcement and Imitation training epochs per update')
-    parser.add_argument('--n_epochs', default=250, type=int,  # 250 50
+    parser.add_argument('--n_epochs', default=50, type=int,  # 250 50
                         help='Number of model training epochs per update')
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Mini batch size of model update')

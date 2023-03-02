@@ -38,8 +38,8 @@ from pred_ppo import PRED_PPO
 from get_il_data import get_frame_data
 
 
-date = "2023-02-24_20-42"  # "2023-02-13_10-46"
-steps = "1000"  # "120000" the first time to turn to the right direction!!!
+date = "2023-03-01_16-00"  # "2023-02-27_16-06"
+steps = "1500"
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,
@@ -205,10 +205,9 @@ if __name__ == "__main__":
             #         action[..., 2] = (action[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
 
             action, _ = model.predict(obs, deterministic=True)
-
-            obs, _ = model.policy.obs_to_tensor(obs)
-            action = model.policy.pred_traj(obs)[..., 0:3]  # pred_traj1
-            action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
+            # obs, _ = model.policy.obs_to_tensor(obs)
+            # action = model.policy.pred_traj(obs)[..., 0:3]  # pred_traj1
+            # action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
             
             obs, rew, done, info = env.step(action)
             print(n)

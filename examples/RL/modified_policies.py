@@ -65,7 +65,7 @@ class MultiInputActorCriticPredPolicy(MultiInputActorCriticPolicy):
         )
         self.pred_net = nn.Linear(self.action_net.in_features, out_features=self.action_net.out_features)  # just default settings
 
-    def forward(self, obs: th.Tensor, deterministic: bool = False) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:
+    def forward(self, obs: th.Tensor, deterministic: bool = False) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:  # False
         """
         Forward pass in all the networks (actor and critic)
 

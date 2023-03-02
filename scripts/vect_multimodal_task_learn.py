@@ -257,7 +257,7 @@ if __name__ == '__main__':
     model_name = "Offline Multimodal Planner"
     model = build_model(cfg)
 
-    # use pretrained model
+    '''# use pretrained model
     pretrained_model_dir = "/mnt/share_disk/user/wangyuxiao/l5kit-RL-pre_train/pre_trained_models"
     pretrained_model_name = "BPTT"
     pretrained_model_path = os.path.join(pretrained_model_dir, pretrained_model_name + ".pt")
@@ -286,7 +286,7 @@ if __name__ == '__main__':
                      "global_prediction_head.output_embed.layers.1.bias", "global_prediction_head.output_embed.layers.2.bias",]
     for name, param in model.named_parameters():
         if name in new_pretrained_model_state_dict and name not in unfixed_paras:
-            param.requires_grad = False
+            param.requires_grad = False'''
 
     # logger
     date = 1117
