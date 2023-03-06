@@ -39,7 +39,7 @@ d = datetime.datetime.now() + datetime.timedelta(hours=8)
 # print(d.strftime('%Y-%m-%d_%H-%M'))
 date = d.strftime('%Y-%m-%d_%H-%M')
 
-lr = 6e-5  # 3e-4 1e-3 6e-5
+lr = 3e-4  # 3e-4 1e-3 6e-5
 from l5kit.configs import load_config_data
 
 

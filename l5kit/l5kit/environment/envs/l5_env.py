@@ -19,6 +19,8 @@ from l5kit.environment.reward import CollisionOffroadReward, L2DisplacementYawRe
 from l5kit.environment.utils import (calculate_non_kinematic_rescale_params, KinematicActionRescaleParams,
                                      NonKinematicActionRescaleParams)
 from l5kit.rasterization import build_rasterizer
+from l5kit.vectorization.vectorizer_builder import build_vectorizer
+from l5kit.data.filter import get_tl_faces_slice_from_frames
 from l5kit.simulation.dataset import SimulationConfig, SimulationDataset
 from l5kit.simulation.unroll import (ClosedLoopSimulator, ClosedLoopSimulatorModes, SimulationOutputCLE,
                                      UnrollInputOutput)
@@ -134,6 +136,9 @@ class L5Env(gym.Env):
         raster_size = cfg["raster_params"]["raster_size"][0]
         n_channels = rasterizer.num_channels()
 
+        # vectorization
+        self.vectorizer = build_vectorizer(cfg, dm)
+
         # load dataset of environment
         self.train = train
         self.overfit = cfg["gym_params"]["overfit"]
@@ -165,7 +170,7 @@ class L5Env(gym.Env):
                                              model_agents=simulation_model)
 
         # self.reward = reward if reward is not None else L2DisplacementYawReward()
-        self.reward = CollisionOffroadReward()
+        self.reward = CollisionOffroadReward(rew_clip_thresh=2.0)
 
         self.max_scene_id = cfg["gym_params"]["max_scene_id"]
         if not self.train:
@@ -313,7 +318,17 @@ class L5Env(gym.Env):
         frame_ego = self.sim_dataset.rasterise_frame_batch(self.frame_index)
         frame_agents = self.sim_dataset.rasterise_agents_frame_batch(self.frame_index)
         frame_agents = [v for v in frame_agents.values()]
-        reward = self.reward.get_reward(frame_ego, frame_agents)
+        # compute the traffic lights faces
+        frame = self.sim_dataset.scene_dataset_batch[self.scene_index].dataset.frames[self.frame_index]
+        tl_faces = self.sim_dataset.scene_dataset_batch[self.scene_index].dataset.tl_faces
+        tl_face = tl_faces[get_tl_faces_slice_from_frames(frame)]
+        # compute the mid lanes coordinates
+        ego_centroid = frame_ego[0]['centroid']
+        ego_from_world = frame_ego[0]['agent_from_world']
+        history_tl_faces = [tl_face]
+        map_features = self.vectorizer._vectorize_map(ego_centroid, ego_from_world, history_tl_faces)
+        lanes_mid = map_features['lanes_mid'][..., :2]
+        reward = self.reward.get_reward(frame_ego, frame_agents, lanes_mid)
 
         # done is True when episode ends
         done = episode_over

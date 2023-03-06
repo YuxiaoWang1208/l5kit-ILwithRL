@@ -35,11 +35,12 @@ config_path = os.getcwd() + "/pred_12_config.yaml"
 os.environ.setdefault('CONFIG_PATH', config_path)
 
 from pred_12 import PRED_12
-from get_il_data import get_frame_data
+from get_il_eval_data import get_frame_data, un_rescale, rescale
 
 
-date = "il3"  # "2023-02-13_10-46"
-steps = "1000"  # "120000" the first time to turn to the right direction!!!
+date = "il3_1000"  # il3_1000 纯12步预测1000场景validate训练 il3 纯12步预测sample39号单场景 il4 纯1步预测sample39号单场景
+steps = "100000"
+scene_id = 40  # 转弯场景：39x 红灯场景：12x 25 绿灯启动场景：13x 15 弯道场景：直道场景：40 58
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,
@@ -119,8 +120,7 @@ if __name__ == "__main__":
     }
 
     sys.path.append("/root/zhufenghua12/wangyuxiao/l5kit-wyx/examples/RL")
-    from get_il_data import get_frame_data
-    from get_il_data import rasterizer
+    from get_il_eval_data import rasterizer
     cfg = load_config_data(args.config)
 
     # train
@@ -138,8 +138,14 @@ if __name__ == "__main__":
     rescale_action = rollout_env.get_attr('rescale_action')[0]
     use_kinematic = rollout_env.get_attr('use_kinematic')[0]
 
+    # to use transform to avoid the difference of rescale between training and evaluating:
+    origin_env_kwargs = {'env_config_path': args.config, 'use_kinematic': args.kinematic, 'return_info': True,
+                       'train': True, 'sim_cfg': rollout_sim_cfg, 'simnet_model_path': args.simnet_model_path}
+    origin_env = make_vec_env("L5-CLE-v0", env_kwargs=origin_env_kwargs, n_envs=1,
+                            vec_env_cls=SubprocVecEnv, vec_env_kwargs={"start_method": "fork"})
+
     # define model
-    model_path = "./models_net3/" + str(steps) + ".pt"
+    model_path = "./models_net3_1000/" + str(steps) + ".pt"
     device = th.device("cpu")
     clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
     if args.load is not None:
@@ -174,9 +180,8 @@ if __name__ == "__main__":
         """
 
         # Set the reset_scene_id to 'idx'
-        # env.reset_scene_id = idx
-        # for remote in env.remotes:
-        #     remote.send(("set_reset_id", idx))
+        # env.set_attr('reset_scene_id', idx)
+        env.env_method('set_reset_id', idx)
         
         # Rollout step-by-step
         obs = env.reset()
@@ -184,27 +189,28 @@ if __name__ == "__main__":
 
         n = 1
         while True:
-            data = get_frame_data(n)
-            xy = data["target_positions"]
-            yaw = data["target_yaws"]
-            action = np.expand_dims(np.concatenate([xy, yaw], axis=-1)[0], axis=0)
+            # data = get_frame_data(idx, n)
+            # xy = data["target_positions"]
+            # yaw = data["target_yaws"]
+            # action = np.expand_dims(np.concatenate([xy, yaw], axis=-1)[0], axis=0)
 
-            # get resacle params and rescale the targets
-            rescale_action = env.get_attr('rescale_action')[0]
-            use_kinematic = env.get_attr('use_kinematic')[0]
-            if rescale_action:
-                if use_kinematic:
-                    kin_rescale = env.get_attr('kin_rescale')[0]
-                    action[..., 0] = action[..., 0] / kin_rescale.steer_scale
-                    action[..., 1] = action[..., 1] / kin_rescale.acc_scale
-                else:
-                    non_kin_rescale = env.get_attr('non_kin_rescale')[0]
-                    action[..., 0] = (action[..., 0] - non_kin_rescale.x_mu) / non_kin_rescale.x_scale
-                    action[..., 1] = (action[..., 1] - non_kin_rescale.y_mu) / non_kin_rescale.y_scale
-                    action[..., 2] = (action[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
+            # # get resacle params and rescale the targets
+            # rescale_action = env.get_attr('rescale_action')[0]
+            # use_kinematic = env.get_attr('use_kinematic')[0]
+            # if rescale_action:
+            #     if use_kinematic:
+            #         kin_rescale = env.get_attr('kin_rescale')[0]
+            #         action[..., 0] = action[..., 0] / kin_rescale.steer_scale
+            #         action[..., 1] = action[..., 1] / kin_rescale.acc_scale
+            #     else:
+            #         non_kin_rescale = env.get_attr('non_kin_rescale')[0]
+            #         action[..., 0] = (action[..., 0] - non_kin_rescale.x_mu) / non_kin_rescale.x_scale
+            #         action[..., 1] = (action[..., 1] - non_kin_rescale.y_mu) / non_kin_rescale.y_scale
+            #         action[..., 2] = (action[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
 
             # il_action = th.tensor(action)
             # action, _ = model.predict(obs, deterministic=True)
+
             obs, _ = model.policy.obs_to_tensor(obs)
             action = model.policy.pred_traj(obs)[..., 0:3]  # pred_traj1
             action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
@@ -226,6 +232,9 @@ if __name__ == "__main__":
             
             # action = model.policy.pred_traj(target_obs)[..., 0:3]
             # action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
+
+            action = rescale(origin_env, action)
+            action = un_rescale(env, action)
             obs, _, done, info = env.step(action)
             print(n)
             n += 1
@@ -238,7 +247,7 @@ if __name__ == "__main__":
         return sim_out, sim_outs
 
     # Rollout one episode
-    sim_out, sim_outs = rollout_episode(model, rollout_env)
+    sim_out, sim_outs = rollout_episode(model, rollout_env, scene_id)
 
     metric_set = CLEMetricSet()
     metric_set.evaluate(sim_outs)
@@ -253,7 +262,7 @@ if __name__ == "__main__":
     def visualize_outputs(sim_outs, map_API):
         for sim_out in sim_outs: # for each scene
             vis_in = episode_out_to_visualizer_scene_gym_cle(sim_out, map_API)
-            save_path = Path(os.getcwd() + "/plots", "plot_" + date + "_PPO_" + steps + ".html")
+            save_path = Path(os.getcwd() + "/plots", "plot_" + date + "_PPO_" + steps + "_" + str(scene_id) + ".html")
             output_file(save_path)
             # show(visualize(sim_out.scene_id, vis_in))
             save(obj=visualize(sim_out.scene_id, vis_in), filename=save_path)

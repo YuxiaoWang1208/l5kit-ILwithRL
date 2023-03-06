@@ -5,7 +5,7 @@ from l5kit.data import ChunkedDataset, LocalDataManager
 from l5kit.dataset import EgoDataset
 from l5kit.rasterization import build_rasterizer
 import torch as th
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset
 
 import numpy as np
 
@@ -42,9 +42,19 @@ else:
 # dataset = EgoDataset(cfg, dataset_zarr, rasterizer, perturbation=AckermanPerturbation2)
 
 dataset = EgoDataset(cfg, dataset_zarr, rasterizer, perturbation=perturbation)
+if cfg["gym_params"]["max_scene_id"] < len(dataset):
+    data_list = []
+    num_of_scenes = 0
+    for scene_id in range(cfg["gym_params"]["max_scene_id"]):
+        scene_1 = dataset.get_scene_dataset(scene_id)
+        data_list.append(scene_1)
+        num_of_scenes += 1  # 累计有多少个场景
+    dataset = ConcatDataset(data_list)
+    print('num_of_scenes:', num_of_scenes)
 if cfg["gym_params"]["overfit"]:  # overfit
     scene_index = cfg["gym_params"]["overfit_id"]
     dataset = dataset.get_scene_dataset(scene_index=scene_index)  # 单场景数据集
+print(dataset)
 train_cfg = cfg["train_data_loader"]
 dataloader = DataLoader(dataset, shuffle=train_cfg["shuffle"], batch_size=int(batch_size/4),
                                 num_workers=train_cfg["num_workers"])
@@ -65,8 +75,8 @@ def get_data():
 
     return il_data_buffer
 
-def get_frame_data(n):
-    frame_data = dataset.get_frame(0, n)
+def get_frame_data(scene_id, n):
+    frame_data = dataset.datasets[scene_id].get_frame(0, n)
     # to cuda device                  
     # frame_data = {k: th.tensor(v).to(device) for k, v in frame_data.items()}
     return frame_data

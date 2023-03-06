@@ -7,10 +7,13 @@ model_params:
   model_architecture: "resnet50"
 
   history_num_frames: 1
-  future_num_frames: 1  # 1 12
+  future_num_frames: 12  # 1 12
   step_time: 0.1
   render_ego_history: True
   load_pretrained: False
+
+  history_num_frames_agents: 1
+  history_num_frames_ego: 1
 
 ###################
 ## Input raster parameters
@@ -49,22 +52,44 @@ raster_params:
   set_origin_to_bottom: True
 
 ###################
+## VectorNet Params
+data_generation_params:
+  # maximum number of other agents to take (if less will be padded)
+  other_agents_num: 30  # 30 15
+  # maximum distance from AoI for another agent to be picked
+  max_agents_distance: 35
+  # Parameters defining which and how many lanes to be retrieved
+  lane_params:
+    # maximum number of lanes to take into account
+    # if less they will be padded; if more the closest to AoI are picked
+    max_num_lanes: 30
+    # max number of points per lane
+    max_points_per_lane: 20
+    # max number of points per crosswalk
+    max_points_per_crosswalk: 20
+    # maximum radius around the AoI for which we retrieve
+    max_retrieval_distance_m: 35
+    # max number of crosswalks
+    max_num_crosswalks: 20
+
+###################
 ## Data loader options
 train_data_loader:
-  key: "scenes/sample.zarr"
+  key: "scenes/validate.zarr"  # "scenes/sample.zarr"
   # batch_size: 64  # Use the same batch size of RL rollout buffer
   shuffle: True
   num_workers: 4  # 4 16
   perturbation: True
 
 val_data_loader:
-  key: "scenes/sample.zarr"
+  key: "scenes/sample.zarr"  # "scenes/sample.zarr"
+  perturbation: False
 
 ###################
 ## Gym params
 gym_params:
-  max_scene_id: 40  # 100 1
-  max_val_scene_id: 40  # 100 1
+  max_scene_id: 1000  # 40 1000
+  max_val_scene_id: 100  # 40 100
   randomize_start_frame: True  # False
-  overfit: True  # 强制限定一个场景id 过拟合
+  overfit: False  # 强制限定一个场景id 过拟合  True
   overfit_id: 39  # 路口弯道

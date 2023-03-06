@@ -8,6 +8,7 @@ from l5kit.cle.metric_set import L5MetricSet
 from l5kit.environment.gym_metric_set import L2DisplacementYawMetricSet
 from l5kit.simulation.unroll import SimulationOutputCLE
 from l5kit.planning import utils
+from l5kit.evaluation.metrics import distance_to_reference_trajectory
 
 
 class Reward(ABC):
@@ -180,8 +181,22 @@ class CollisionOffroadReward(Reward):
             agent_bbox = utils._get_bounding_box(agent_centroid, agent_yaw, agent_extent)
         distance = ego_bbox.distance(agent_bbox)
         return distance
+    
+    @staticmethod
+    def get_distance_to_centroid(
+        current_centroid,
+        ref_lanes,
+        consider_avail=False,
+    ):
+        if type(current_centroid) is th.Tensor:
+            distance = distance_to_reference_trajectory(current_centroid, ref_lanes)
+        else:
+            current_centroid = th.tensor(np.array(current_centroid))
+            ref_lanes = th.tensor(np.array(ref_lanes))
+            distance = distance_to_reference_trajectory(current_centroid, ref_lanes)
+        return distance.cpu().numpy()[0]
 
-    def get_reward(self, frame_ego: List[Dict[str, np.ndarray]], frame_agents: List[Dict[str, np.ndarray]]) -> Dict[str, float]:
+    def get_reward(self, frame_ego: List[Dict[str, np.ndarray]], frame_agents: List[Dict[str, np.ndarray]], lanes_mid) -> Dict[str, float]:
         """Get the reward for the given step in close loop training.
 
         :param frame_ego: all ego info in current frame of simulation
@@ -189,7 +204,7 @@ class CollisionOffroadReward(Reward):
         :return: the dictionary containing total reward and individual components that make up the reward
         """
         # compute the collision avoid reward
-        dist_list = []
+        dist_car_list = []
         ego_centroid = frame_ego[0]['centroid']
         ego_yaw = frame_ego[0]['yaw']
         ego_extent = frame_ego[0]['extent']
@@ -200,20 +215,28 @@ class CollisionOffroadReward(Reward):
                 agent_extent = agent_info['extent']
                 dist = self.get_distance_to_other_agents(ego_centroid, ego_yaw, ego_extent,
                                                     agent_centroid, agent_yaw, agent_extent)
-                dist_list.append(dist)
+                dist_car_list.append(dist)
         else:
-            dist_list.append(100.0)
-        min_dist = min(dist_list)
-        col_reward = min(min_dist - 2, 0)
+            dist_car_list.append(100.0)
+        min_dist_car = min(dist_car_list)
+        col_reward = min(min_dist_car - 2, 0)  # -2~0
 
         # compute the off-road avoid reward
+        
+        dist_lane_list = []
+        for mid_lane in lanes_mid:
+            dist_lane_list.append(
+                self.get_distance_to_centroid([frame_ego[0]['history_positions'][0]], [mid_lane])
+                )
+        min_dist_lane = min(dist_lane_list)
+        off_reward = min(-(min_dist_lane - 1), 0)  # -inf~0
 
-        # clip the reward
+        # clip the off-road reward -2~0
         if self.enable_clip:
-            col_reward = min(self.rew_clip_thresh, col_reward)
+            off_reward = max(-self.rew_clip_thresh , min(self.rew_clip_thresh, off_reward))
 
         # Total reward
-        total_reward = col_reward
+        total_reward = col_reward + off_reward
 
-        reward_dict = {"total": total_reward, "collision": col_reward, "off-road": None}
+        reward_dict = {"total": total_reward, "collision": col_reward, "off-road": off_reward}
         return reward_dict

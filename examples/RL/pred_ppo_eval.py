@@ -35,11 +35,12 @@ config_path = os.getcwd() + "/pred_ppo_config.yaml"
 os.environ.setdefault('CONFIG_PATH', config_path)
 
 from pred_ppo import PRED_PPO
-from get_il_data import get_frame_data
+from get_il_eval_data import get_frame_data, un_rescale, rescale
 
 
-date = "2023-03-01_16-00"  # "2023-02-27_16-06"
-steps = "1500"
+date = "2023-03-04_09-57"  # "2023-02-27_16-06"
+steps = "5000"
+scene_id = 39  # 转弯场景：39x 红灯场景：12x 25 绿灯启动场景：13x 15 弯道场景：直道场景：40 58
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,
@@ -117,8 +118,7 @@ if __name__ == "__main__":
     }
 
     sys.path.append("/root/zhufenghua12/wangyuxiao/l5kit-wyx/examples/RL")
-    from get_il_data import get_frame_data
-    from get_il_data import rasterizer
+    from get_il_eval_data import rasterizer
     args.config = os.environ["CONFIG_PATH"]
     cfg = load_config_data(args.config)
 
@@ -137,6 +137,12 @@ if __name__ == "__main__":
     
     rescale_action = rollout_env.get_attr('rescale_action')[0]
     use_kinematic = rollout_env.get_attr('use_kinematic')[0]
+
+    # to use transform to avoid the difference of rescale between training and evaluating:
+    origin_env_kwargs = {'env_config_path': args.config, 'use_kinematic': args.kinematic, 'return_info': True,
+                       'train': True, 'sim_cfg': rollout_sim_cfg, 'simnet_model_path': args.simnet_model_path}
+    origin_env = make_vec_env("L5-CLE-v0", env_kwargs=origin_env_kwargs, n_envs=1,
+                            vec_env_cls=SubprocVecEnv, vec_env_kwargs={"start_method": "fork"})
 
     # define model
     model_path = "./models_" + str(date) + "/" + str(steps) + ".pt"
@@ -174,9 +180,8 @@ if __name__ == "__main__":
         """
 
         # Set the reset_scene_id to 'idx'
-        # env.reset_scene_id = idx
-        # for remote in env.remotes:
-        #     remote.send(("set_reset_id", idx))
+        # env.set_attr('reset_scene_id', idx)
+        env.env_method('set_reset_id', idx)
         
         # Rollout step-by-step
         obs = env.reset()
@@ -209,6 +214,8 @@ if __name__ == "__main__":
             # action = model.policy.pred_traj(obs)[..., 0:3]  # pred_traj1
             # action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
             
+            action = rescale(origin_env, action)
+            action = un_rescale(env, action)
             obs, rew, done, info = env.step(action)
             print(n)
             # print("reward:", rew)
@@ -224,7 +231,7 @@ if __name__ == "__main__":
         return sim_out, sim_outs
 
     # Rollout one episode
-    sim_out, sim_outs = rollout_episode(model, rollout_env)
+    sim_out, sim_outs = rollout_episode(model, rollout_env, scene_id)
 
     metric_set = CLEMetricSet()
     metric_set.evaluate(sim_outs)
@@ -239,7 +246,7 @@ if __name__ == "__main__":
     def visualize_outputs(sim_outs, map_API):
         for sim_out in sim_outs: # for each scene
             vis_in = episode_out_to_visualizer_scene_gym_cle(sim_out, map_API)
-            save_path = Path(os.getcwd() + "/plots", "plot_" + date + "_PPO_" + steps + ".html")
+            save_path = Path(os.getcwd() + "/plots", "plot_" + date + "_ilPPO_" + steps + "_" + str(scene_id) + ".html")
             output_file(save_path)
             # show(visualize(sim_out.scene_id, vis_in))
             save(obj=visualize(sim_out.scene_id, vis_in), filename=save_path)

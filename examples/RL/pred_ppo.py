@@ -525,7 +525,7 @@ class PRED_PPO(PPO):
 
             # ==== save the model ====
             # from pred_ppo_training import MODEL_PATH
-            if self._n_updates % 250 == 0:
+            if self._n_updates % 1000 == 0:
                 model_path = f"{os.getcwd()}/models_" + os.environ["DATE"] + f"/{self._n_updates}.pt"  # pt zip
                 self.save(model_path)
 

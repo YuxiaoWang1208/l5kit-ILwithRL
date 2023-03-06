@@ -155,6 +155,8 @@ class PRED_12(PPO):
         self.n_RL_epochs = n_RL_epochs
         self.n_epochs = n_epochs
 
+        self.IL_losses_mean = float(0)
+
         # num_targets = self.action_space.shape[0] * (self.future_num_frames - 1)
         # self.policy.pred_net = nn.Linear(self.policy.action_net.in_features, out_features=num_targets).to(self.policy.device)
         # print(self.policy.pred_net)
@@ -358,6 +360,7 @@ class PRED_12(PPO):
 
                 IL_loss = self.il_coef * pred_loss  # IL
                 IL_losses.append(IL_loss.item())
+                self.IL_losses_mean = (self.IL_losses_mean * self._n_updates + IL_loss.item()) / (self._n_updates+1)
 
                 # Optimization step
                 self.policy.optimizer.zero_grad()
@@ -380,7 +383,7 @@ class PRED_12(PPO):
             self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
             self.logger.record("train/clip_fraction", np.mean(clip_fractions))
             self.logger.record("train/IL_loss", IL_loss.item())
-            self.logger.record("train/IL_loss_mean", np.mean(IL_losses))
+            self.logger.record("train/IL_loss_mean", self.IL_losses_mean)# np.mean(IL_losses))
             # self.logger.record("train/RL_loss", RL_loss.item())
 
             self.logger.record("train/explained_variance", explained_var)
@@ -402,8 +405,8 @@ class PRED_12(PPO):
 
             # ==== save the model ====
             # from pred_12_training import MODEL_PATH
-            if self._n_updates % 250 == 0:
-                model_path = f"{os.getcwd()}/models_" + "net3" + f"/{self._n_updates}.pt"  # pt zip
+            if self._n_updates % 500 == 0:
+                model_path = f"{os.getcwd()}/models_" + "net3_1000" + f"/{self._n_updates}.pt"  # pt zip
                 self.save(model_path)
 
             self._n_updates += 1
