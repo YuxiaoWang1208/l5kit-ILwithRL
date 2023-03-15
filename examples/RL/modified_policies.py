@@ -64,6 +64,7 @@ class MultiInputActorCriticPredPolicy(MultiInputActorCriticPolicy):
             optimizer_kwargs,
         )
         self.pred_net = nn.Linear(self.action_net.in_features, out_features=self.action_net.out_features)  # just default settings
+        # self.vf_features_extractor = self.features_extractor_class(self.observation_space, **self.features_extractor_kwargs)
 
     def forward(self, obs: th.Tensor, deterministic: bool = False) -> Tuple[th.Tensor, th.Tensor, th.Tensor]:  # False
         """

@@ -136,8 +136,8 @@ class L5Env(gym.Env):
         raster_size = cfg["raster_params"]["raster_size"][0]
         n_channels = rasterizer.num_channels()
 
-        # vectorization
-        self.vectorizer = build_vectorizer(cfg, dm)
+        # # vectorization
+        # self.vectorizer = build_vectorizer(cfg, dm)
 
         # load dataset of environment
         self.train = train
@@ -171,6 +171,7 @@ class L5Env(gym.Env):
 
         # self.reward = reward if reward is not None else L2DisplacementYawReward()
         self.reward = CollisionOffroadReward(rew_clip_thresh=2.0)
+        # self.reward1 = L2DisplacementYawReward()
 
         self.max_scene_id = cfg["gym_params"]["max_scene_id"]
         if not self.train:
@@ -318,17 +319,21 @@ class L5Env(gym.Env):
         frame_ego = self.sim_dataset.rasterise_frame_batch(self.frame_index)
         frame_agents = self.sim_dataset.rasterise_agents_frame_batch(self.frame_index)
         frame_agents = [v for v in frame_agents.values()]
-        # compute the traffic lights faces
-        frame = self.sim_dataset.scene_dataset_batch[self.scene_index].dataset.frames[self.frame_index]
-        tl_faces = self.sim_dataset.scene_dataset_batch[self.scene_index].dataset.tl_faces
-        tl_face = tl_faces[get_tl_faces_slice_from_frames(frame)]
-        # compute the mid lanes coordinates
-        ego_centroid = frame_ego[0]['centroid']
-        ego_from_world = frame_ego[0]['agent_from_world']
-        history_tl_faces = [tl_face]
-        map_features = self.vectorizer._vectorize_map(ego_centroid, ego_from_world, history_tl_faces)
-        lanes_mid = map_features['lanes_mid'][..., :2]
+        # # compute the traffic lights faces
+        # frame = self.sim_dataset.scene_dataset_batch[self.scene_index].dataset.frames[self.frame_index]
+        # tl_faces = self.sim_dataset.scene_dataset_batch[self.scene_index].dataset.tl_faces
+        # tl_face = tl_faces[get_tl_faces_slice_from_frames(frame)]
+        # # compute the mid lanes coordinates
+        # ego_centroid = frame_ego[0]['centroid']
+        # ego_from_world = frame_ego[0]['agent_from_world']
+        # history_tl_faces = [tl_face]
+        # map_features = self.vectorizer._vectorize_map(ego_centroid, ego_from_world, history_tl_faces)
+        # lanes_mid = map_features['lanes_mid'][..., :2]
+        lanes_mid = 0.0
         reward = self.reward.get_reward(frame_ego, frame_agents, lanes_mid)
+        # reward1 = self.reward1.get_reward(self.frame_index, [simulated_outputs])
+        # reward['total'] = reward['total'] + 0.001*reward1['total']
+        # print(reward1['total'])
 
         # done is True when episode ends
         done = episode_over

@@ -95,8 +95,8 @@ class PRED_PPO(PPO):
         clip_range_vf: Union[None, float, Schedule] = None,
         normalize_advantage: bool = True,
         il_coef: float = 1.0,  # 0.0 1.0
-        ent_coef: float = 0.0,  # 0.0
-        vf_coef: float = 0.5,  # 0.5 0.005 2e-4
+        ent_coef: float = 0.0,  # 0.0 0.01
+        vf_coef: float = 0.5,  # 0.5 0.1
         max_grad_norm: float = 0.5,
         use_sde: bool = False,
         sde_sample_freq: int = -1,
@@ -348,8 +348,11 @@ class PRED_PPO(PPO):
 
             # ==== one training epoch ====
             approx_kl_divs = []
+            # if not epoch >= self.n_RL_epochs:  # il and rl
+            rollout_datas = list(self.rollout_buffer.get(self.batch_size))
             # Do a complete pass on the rollout buffer
-            for rollout_data in self.rollout_buffer.get(self.batch_size):
+            # for rollout_data in self.rollout_buffer.get(self.batch_size):  # SLOW!!!
+            for k in range(int(self.rollout_buffer.buffer_size/self.batch_size)):
                 # ===== Imitation learning data for iteration =====
                 il_data_buffer = get_data()
                 # get dataset observations
@@ -394,7 +397,19 @@ class PRED_PPO(PPO):
                 IL_losses.append(IL_loss.item())
                 self.IL_losses_mean = (self.IL_losses_mean * self._n_updates + IL_loss.item()) / (self._n_updates+1)
 
+                # if epoch >= self.n_RL_epochs:  # only il
+                #     # Optimization step
+                #     self.policy.optimizer.zero_grad()
+                #     IL_loss.backward()
+                #     # Clip grad norm
+                #     th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                #     self.policy.optimizer.step()
+                #     if not continue_training:
+                #         break        
+                #     continue
 
+
+                rollout_data = rollout_datas[k]
                 actions = rollout_data.actions
                 if isinstance(self.action_space, spaces.Discrete):
                     # Convert discrete action from float to long
@@ -456,7 +471,7 @@ class PRED_PPO(PPO):
                 self.RL_losses_mean = (self.RL_losses_mean * self._n_updates + RL_loss.item()) / (self._n_updates+1)
                 V_loss = self.vf_coef * value_loss
 
-                total_loss = IL_loss + RL_loss
+                total_loss = IL_loss + 0.1 * RL_loss
 
                 # Calculate approximate form of reverse KL Divergence for early stopping
                 # see issue #417: https://github.com/DLR-RM/stable-baselines3/issues/417
@@ -484,6 +499,7 @@ class PRED_PPO(PPO):
 
                 # Optimization step
                 self.policy.optimizer.zero_grad()
+                # il + rl
                 total_loss.backward()
                 # Clip grad norm
                 th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
@@ -525,7 +541,7 @@ class PRED_PPO(PPO):
 
             # ==== save the model ====
             # from pred_ppo_training import MODEL_PATH
-            if self._n_updates % 1000 == 0:
+            if self._n_updates % 5000 == 0:
                 model_path = f"{os.getcwd()}/models_" + os.environ["DATE"] + f"/{self._n_updates}.pt"  # pt zip
                 self.save(model_path)
 

@@ -134,6 +134,7 @@ if __name__ == "__main__":
     pretrained = True
     policy_kwargs = {
         "features_extractor_class": CustomFeatureExtractor,
+        "share_features_extractor": False,  # True
         "features_extractor_kwargs": {"features_dim": args.features_dim, "model_arch": args.model_arch, "pretrained": pretrained},
         "normalize_images": False
     }
@@ -155,7 +156,7 @@ if __name__ == "__main__":
     eval_sim_cfg.num_simulation_steps = None
     eval_sim_cfg.use_agents_gt = (not args.simnet)
     eval_env_kwargs = {'env_config_path': args.config, 'use_kinematic': args.kinematic, 'return_info': True,
-                       'train': False, 'sim_cfg': eval_sim_cfg, 'simnet_model_path': args.simnet_model_path}
+                       'train': True, 'sim_cfg': eval_sim_cfg, 'simnet_model_path': args.simnet_model_path}  #'train': False
     eval_env = make_vec_env("L5-CLE-v0", env_kwargs=eval_env_kwargs, n_envs=args.n_eval_envs,
                             vec_env_cls=SubprocVecEnv, vec_env_kwargs={"start_method": "fork"})
 

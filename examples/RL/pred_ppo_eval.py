@@ -38,9 +38,9 @@ from pred_ppo import PRED_PPO
 from get_il_eval_data import get_frame_data, un_rescale, rescale
 
 
-date = "2023-03-04_09-57"  # "2023-02-27_16-06"
+date = "2023-03-15_10-55"  # "2023-02-27_16-06"
 steps = "5000"
-scene_id = 39  # 转弯场景：39x 红灯场景：12x 25 绿灯启动场景：13x 15 弯道场景：直道场景：40 58
+scene_id = 40  # 转弯场景：39x 红灯场景：12x 25 绿灯启动场景：13x 15 弯道场景：直道场景：40 58
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,

@@ -163,8 +163,8 @@ class PRED_12(PPO):
         
     def _setup_model(self) -> None:
         super()._setup_model()
-        # num_targets = self.action_space.shape[0] * (self.future_num_frames - 1)
-        num_targets = self.action_space.shape[0] * self.future_num_frames
+        num_targets = self.action_space.shape[0] * (self.future_num_frames - 1)
+        # num_targets = self.action_space.shape[0] * self.future_num_frames
         self.policy.pred_net = nn.Linear(self.policy.action_net.in_features, out_features=num_targets).to(self.policy.device)
         # self.policy.pred_net = nn.Linear(self.policy.features_extractor._features_dim, out_features=num_targets).to(self.policy.device)
 
@@ -323,11 +323,11 @@ class PRED_12(PPO):
                 il_actions_dist = self.policy.get_distribution(il_obs)
                 # get action_net actions
                 # il_actions = il_actions_dist.mode()
-                il_actions = il_actions_dist.get_actions()
+                il_actions = il_actions_dist.get_actions(deterministic=True)
                 pred_actions = self.policy.pred_traj(il_obs)
-                # traj_actions = th.cat((il_actions, pred_actions), dim=-1)
+                traj_actions = th.cat((il_actions, pred_actions), dim=-1)
                 # pred_actions = self.policy.pred_traj1(il_obs)
-                traj_actions = pred_actions
+                # traj_actions = pred_actions
 
                 # traj_actions = traj_actions.view(pred_actions.shape[0], self.future_num_frames, -1)
 
@@ -405,8 +405,8 @@ class PRED_12(PPO):
 
             # ==== save the model ====
             # from pred_12_training import MODEL_PATH
-            if self._n_updates % 500 == 0:
-                model_path = f"{os.getcwd()}/models_" + "net3_1000" + f"/{self._n_updates}.pt"  # pt zip
+            if self._n_updates % 5000 == 0:
+                model_path = f"{os.getcwd()}/models_" + "pretrain_1000" + f"/{self._n_updates}.pt"  # pt zip
                 self.save(model_path)
 
             self._n_updates += 1

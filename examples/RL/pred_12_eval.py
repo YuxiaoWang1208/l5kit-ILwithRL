@@ -38,9 +38,9 @@ from pred_12 import PRED_12
 from get_il_eval_data import get_frame_data, un_rescale, rescale
 
 
-date = "il3_1000"  # il3_1000 纯12步预测1000场景validate训练 il3 纯12步预测sample39号单场景 il4 纯1步预测sample39号单场景
-steps = "100000"
-scene_id = 40  # 转弯场景：39x 红灯场景：12x 25 绿灯启动场景：13x 15 弯道场景：直道场景：40 58
+date = "pretrain_1000"  # il3_1000 纯12步预测1000场景validate训练 il3 纯12步预测sample39号单场景 il4 纯1步预测sample39号单场景
+steps = "100000"  # 100000
+scene_id = 15  # 转弯场景：39x 红灯场景：12x 25 绿灯启动场景：13x 15 弯道场景：直道场景：40 58
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,
@@ -145,7 +145,7 @@ if __name__ == "__main__":
                             vec_env_cls=SubprocVecEnv, vec_env_kwargs={"start_method": "fork"})
 
     # define model
-    model_path = "./models_net3_1000/" + str(steps) + ".pt"
+    model_path = "./models_pretrain_1000/" + str(steps) + ".pt"
     device = th.device("cpu")
     clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
     if args.load is not None:
@@ -209,11 +209,11 @@ if __name__ == "__main__":
             #         action[..., 2] = (action[..., 2] - non_kin_rescale.yaw_mu) / non_kin_rescale.yaw_scale
 
             # il_action = th.tensor(action)
-            # action, _ = model.predict(obs, deterministic=True)
 
-            obs, _ = model.policy.obs_to_tensor(obs)
-            action = model.policy.pred_traj(obs)[..., 0:3]  # pred_traj1
-            action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
+            action, _ = model.predict(obs, deterministic=True)
+            # obs, _ = model.policy.obs_to_tensor(obs)
+            # action = model.policy.pred_traj(obs)[..., 0:3]  # pred_traj1
+            # action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
 
             # target_actions = th.cat((th.tensor(xy), th.tensor(yaw)), dim=-1).view(1, -1)
             # target_actions[..., 0] = (target_actions[..., 0] - non_kin_rescale.x_mu) / non_kin_rescale.x_scale

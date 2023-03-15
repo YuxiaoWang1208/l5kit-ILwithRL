@@ -41,9 +41,10 @@ date = d.strftime('%Y-%m-%d_%H-%M')
 os.environ.setdefault('DATE', date)
 
 from pred_ppo import PRED_PPO
+from pred_12 import PRED_12
 
 
-lr = 6e-5  # 3e-4 1e-3 6e-5
+lr = 3e-4  # 3e-4 1e-3 6e-5
 from l5kit.configs import load_config_data
 
 
@@ -66,7 +67,7 @@ if __name__ == "__main__":
                         help='Folder to save model checkpoints')
     parser.add_argument('--save_freq', default=1000000, type=int,  # 100000 1000
                         help='Frequency to save model checkpoints')
-    parser.add_argument('--eval_freq', default=1000, type=int,  # 10000 1000
+    parser.add_argument('--eval_freq', default=10000, type=int,  # 10000 1000
                         help='Frequency to evaluate model state')
     parser.add_argument('--n_eval_episodes', default=1, type=int,  # 10
                         help='Number of episodes to evaluate')
@@ -76,7 +77,7 @@ if __name__ == "__main__":
                         help='Number of rollout steps per environment per model update')
     parser.add_argument('--n_IL_epochs', default=10, type=int,
                         help='Number of model Imitation training epochs per update')
-    parser.add_argument('--n_RL_epochs', default=10, type=int,
+    parser.add_argument('--n_RL_epochs', default=50, type=int,  # 50 10
                         help='Number of model Reinforcement and Imitation training epochs per update')
     parser.add_argument('--n_epochs', default=50, type=int,  # 250 50
                         help='Number of model training epochs per update')
@@ -162,6 +163,26 @@ if __name__ == "__main__":
                     n_RL_epochs=args.n_RL_epochs,
                     n_epochs = args.n_epochs, weights_scaling=[1., 1., 1.],
                     clip_range=clip_schedule, batch_size=args.batch_size, seed=args.seed, gae_lambda=args.gae_lambda)
+
+    # use pretrained 12 steps prediction model
+    pre_model_path = "./models_pretrain_1000/" + str(100000) + ".pt"
+    pre_model = PRED_12.load(pre_model_path, env, device=device, clip_range=clip_schedule, learning_rate=args.lr)
+    pre_model_paras = pre_model.get_parameters()
+    # print(pre_model.policy.optimizer.state_dict()['param_groups'])
+    # print(model.policy.optimizer.state_dict()['param_groups'])
+    # model.policy.optimizer = pre_model.policy.optimizer
+    # del pre_model_paras['policy.optimizer']
+    for key in pre_model_paras['policy'].keys():
+        # if 'pred_net' in key:
+        #     para = key.split('.')[1]
+        #     new_para = 'action_net.' + para
+        #     pre_model_paras['policy'][new_para] = pre_model_paras['policy'][key][:3, ...]
+        #     pre_model_paras['policy'][key] = pre_model_paras['policy'][key][3:, ...]
+        if 'pi_features_extractor' in key:
+            para = key.split('.', 1)[1]
+            new_para = 'vf_features_extractor.' + para
+            pre_model_paras['policy'][new_para] = pre_model_paras['policy'][key]
+    model.set_parameters(pre_model_paras, exact_match=False)
 
     # make eval env
     eval_sim_cfg = SimulationConfigGym()

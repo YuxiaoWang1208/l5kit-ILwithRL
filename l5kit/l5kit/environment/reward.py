@@ -221,21 +221,24 @@ class CollisionOffroadReward(Reward):
         min_dist_car = min(dist_car_list)
         col_reward = min(min_dist_car - 2, 0)  # -2~0
 
-        # compute the off-road avoid reward
+        # # compute the off-road avoid reward
         
-        dist_lane_list = []
-        for mid_lane in lanes_mid:
-            dist_lane_list.append(
-                self.get_distance_to_centroid([frame_ego[0]['history_positions'][0]], [mid_lane])
-                )
-        min_dist_lane = min(dist_lane_list)
-        off_reward = min(-(min_dist_lane - 1), 0)  # -inf~0
+        # dist_lane_list = []
+        # for mid_lane in lanes_mid:
+        #     dist_lane_list.append(
+        #         self.get_distance_to_centroid([frame_ego[0]['history_positions'][0]], [mid_lane])
+        #         )
+        # min_dist_lane = min(dist_lane_list)
+        # off_reward = min(-(min_dist_lane - 1), 0)  # -inf~0
 
-        # clip the off-road reward -2~0
-        if self.enable_clip:
-            off_reward = max(-self.rew_clip_thresh , min(self.rew_clip_thresh, off_reward))
+        # # clip the off-road reward -2~0
+        # if self.enable_clip:
+        #     off_reward = max(-self.rew_clip_thresh , min(self.rew_clip_thresh, off_reward))
 
-        # Total reward
+        # # Total reward
+        # total_reward = col_reward + off_reward
+
+        off_reward = 0.0
         total_reward = col_reward + off_reward
 
         reward_dict = {"total": total_reward, "collision": col_reward, "off-road": off_reward}
