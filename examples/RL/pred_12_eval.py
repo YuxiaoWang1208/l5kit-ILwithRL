@@ -38,9 +38,9 @@ from pred_12 import PRED_12
 from get_il_eval_data import get_frame_data, un_rescale, rescale
 
 
-date = "pretrain_1000"  # il3_1000 纯12步预测1000场景validate训练 il3 纯12步预测sample39号单场景 il4 纯1步预测sample39号单场景
-steps = "100000"  # 100000
-scene_id = 15  # 转弯场景：39x 红灯场景：12x 25 绿灯启动场景：13x 15 弯道场景：直道场景：40 58
+date = "pretrain_withturn1"  # il3_1000 纯12步预测1000场景validate训练 il3 纯12步预测sample39号单场景 il4 纯1步预测sample39号单场景
+steps = "5000"  # 100000
+scene_id = 14  # 转弯场景：39x 红灯场景：12x 25 绿灯启动场景：13x 15 弯道场景：直道场景：40 58
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str,
@@ -145,7 +145,7 @@ if __name__ == "__main__":
                             vec_env_cls=SubprocVecEnv, vec_env_kwargs={"start_method": "fork"})
 
     # define model
-    model_path = "./models_pretrain_1000/" + str(steps) + ".pt"
+    model_path = "./models_" + date + "/" + str(steps) + ".pt"
     device = th.device("cpu")
     clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
     if args.load is not None:
@@ -233,8 +233,8 @@ if __name__ == "__main__":
             # action = model.policy.pred_traj(target_obs)[..., 0:3]
             # action = action.cpu().numpy().reshape((-1,) + model.policy.action_space.shape)
 
-            action = rescale(origin_env, action)
-            action = un_rescale(env, action)
+            # action = rescale(origin_env, action)
+            # action = un_rescale(env, action)
             obs, _, done, info = env.step(action)
             print(n)
             n += 1

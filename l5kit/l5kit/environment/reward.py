@@ -5,7 +5,7 @@ import numpy as np
 import torch as th
 
 from l5kit.cle.metric_set import L5MetricSet
-from l5kit.environment.gym_metric_set import L2DisplacementYawMetricSet
+from l5kit.environment.gym_metric_set import L2DisplacementYawMetricSet, CLEMetricSet
 from l5kit.simulation.unroll import SimulationOutputCLE
 from l5kit.planning import utils
 from l5kit.evaluation.metrics import distance_to_reference_trajectory
@@ -117,13 +117,139 @@ class L2DisplacementYawReward(Reward):
             yaw_reward -= yaw_error.item()
 
         # Total reward
-        total_reward = dist_reward + yaw_reward
+        total_reward = 0.01 * dist_reward + yaw_reward
 
         reward_dict = {"total": total_reward, "distance": dist_reward, "yaw": yaw_reward}
         return reward_dict
 
 
 class CollisionOffroadReward(Reward):
+    """This class is responsible for calculating a reward based on
+    (1) Distance between the ego and a nearest bounding box of other agents
+    (2) Distance of the ego to the referance trajectory
+    during close loop simulation within the gym-compatible L5Kit environment.
+
+    :param reward_prefix: the prefix that will identify this reward class
+    :param metric_set: the set of metrics to compute
+    :param enable_clip: flag to determine whether to clip reward
+    :param rew_clip_thresh: the threshold to clip the reward
+    :param use_yaw: flag to penalize the yaw prediction
+    :param yaw_weight: weight of the yaw error
+    """
+
+    def __init__(self, reward_prefix: str = "CollisionOffroad", metric_set: Optional[L5MetricSet] = None,
+                 enable_clip: bool = True, rew_clip_thresh: float = 15.0,
+                 use_yaw: Optional[bool] = True, yaw_weight: Optional[float] = 1.0) -> None:
+        """Constructor method
+        """
+        self.reward_prefix = reward_prefix
+        # Metric Set
+        self.metric_set = metric_set if metric_set is not None else CLEMetricSet()
+
+        # Verify that error metrics necessary for reward calculation are present in the metric set
+        if 'distance_ref_trajectory' not in self.metric_set.evaluation_plan.validators_dict():
+            raise RuntimeError('\'distance_ref_trajectory\' missing in metric set')
+
+        self.enable_clip = enable_clip
+        self.rew_clip_thresh = rew_clip_thresh
+
+    def reset(self) -> None:
+        """Reset the closed loop evaluator when a new episode starts.
+        """
+        self.metric_set.reset()
+
+    @staticmethod
+    def get_distance_to_other_agents(
+        ego_centroid,
+        ego_yaw,
+        ego_extent,
+        agent_centroid,
+        agent_yaw,
+        agent_extent,
+    ):
+        if type(ego_centroid) is th.Tensor:
+            ego_bbox = utils._get_bounding_box(ego_centroid.cpu().numpy(), ego_yaw.cpu().numpy(), ego_extent.cpu().numpy())
+            agent_bbox = utils._get_bounding_box(agent_centroid.cpu().numpy(), agent_yaw.cpu().numpy(),
+                                                agent_extent.cpu().numpy())
+        else:
+            ego_bbox = utils._get_bounding_box(ego_centroid, ego_yaw, ego_extent)
+            agent_bbox = utils._get_bounding_box(agent_centroid, agent_yaw, agent_extent)
+        distance = ego_bbox.distance(agent_bbox)
+        return distance
+
+    @staticmethod
+    def slice_simulated_output(index: int, simulated_outputs: List[SimulationOutputCLE]) -> List[SimulationOutputCLE]:
+        """ Slice the simulated output at a particular frame index.
+        This prevent calculating metric over all frames.
+
+        :param index: the frame index at which the simulation outputs is to be sliced
+        :param simulated_outputs: the object contain the ego target and prediction attributes
+        :return: the sliced simulation output
+        """
+        # Only the simulated and recorded ego states are used for metric calculation
+        simulated_outputs[0].recorded_ego_states = simulated_outputs[0].recorded_ego_states[index:index + 1]
+        simulated_outputs[0].simulated_ego_states = simulated_outputs[0].simulated_ego_states[index:index + 1]
+        return simulated_outputs
+
+    def get_reward(self, frame_index: int, simulated_outputs: List[SimulationOutputCLE], frame_ego: List[Dict[str, np.ndarray]], frame_agents: List[Dict[str, np.ndarray]], lanes_mid) -> Dict[str, float]:
+        """Get the reward for the given step in close loop training.
+
+        :param frame_ego: all ego info in current frame of simulation
+        :param frame_agents: all agents info in current frame of simulation
+        :return: the dictionary containing total reward and individual components that make up the reward
+        """
+        # compute the collision avoid reward
+        dist_car_list = []
+        ego_centroid = frame_ego[0]['centroid']
+        ego_yaw = frame_ego[0]['yaw']
+        ego_extent = frame_ego[0]['extent']
+        if len(frame_agents) > 0:
+            for agent_info in frame_agents:
+                agent_centroid = agent_info['centroid']
+                agent_yaw = agent_info['yaw']
+                agent_extent = agent_info['extent']
+                dist = self.get_distance_to_other_agents(ego_centroid, ego_yaw, ego_extent,
+                                                    agent_centroid, agent_yaw, agent_extent)
+                dist_car_list.append(dist)
+        else:
+            dist_car_list.append(100.0)
+        min_dist_car = min(dist_car_list)
+        col_reward = min(min_dist_car - 1.5, 0)  # -2~0
+
+        # # compute the off-road avoid reward
+        # scene_id = simulated_outputs[0].scene_id
+        # # Get the simulated output value at frame index + 1
+        # simulated_outputs = self.slice_simulated_output(frame_index + 1, simulated_outputs)
+        # # Evaluate metrics on the sliced simulated output
+        # self.metric_set.evaluate(simulated_outputs)
+        # scene_vals = self.metric_set.evaluator.scene_validation_results[scene_id]
+        # off_road = not scene_vals['distance_ref_trajectory'].is_valid_scene
+        # # off_road = not scene_vals['displacement_error_l2'].is_valid_scene
+        # if off_road:
+        #     off_reward = -1.5 # * 10
+        # else:
+        #     off_reward = 0.1
+
+        # col_front = not scene_vals['collision_front'].is_valid_scene
+        # col_rear = not scene_vals['collision_rear'].is_valid_scene
+        # col_side = not scene_vals['collision_side'].is_valid_scene
+        # if col_front or col_rear or col_side:
+        #     col_reward = -1.5 # * 10
+        # else:
+        #     col_reward = 0.1
+
+        off_reward = 0
+        # Total reward
+        total_reward = col_reward + off_reward
+
+        # off_reward = 0.0
+        # total_reward = col_reward + off_reward
+
+        reward_dict = {"total": total_reward, "collision": col_reward, "off-road": off_reward}
+        return reward_dict
+
+
+class CollisionOffroadReward1(Reward):
     """This class is responsible for calculating a reward based on
     (1) Distance between the ego and a nearest bounding box of other agents
     (2) Distance of the ego to the mid lane
@@ -219,7 +345,7 @@ class CollisionOffroadReward(Reward):
         else:
             dist_car_list.append(100.0)
         min_dist_car = min(dist_car_list)
-        col_reward = min(min_dist_car - 2, 0)  # -2~0
+        col_reward = min(min_dist_car - 1.5, 0)  # -2~0
 
         # # compute the off-road avoid reward
         

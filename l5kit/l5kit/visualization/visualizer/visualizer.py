@@ -42,7 +42,7 @@ def visualize(scene_index: int, frames: List[FrameVisualization]) -> LayoutDOM:
 
     agent_hover = HoverTool(
         mode="mouse",
-        names=["agents"],
+        name="agents",
         tooltips=[
             ("Type", "@agent_type"),
             ("Probability", "@prob{0.00}%"),

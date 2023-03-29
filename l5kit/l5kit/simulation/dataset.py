@@ -136,6 +136,8 @@ class SimulationDataset:
         for scene_idx, scene_dt in self.scene_dataset_batch.items():
             frame = scene_dt[state_index]
             frame["scene_index"] = scene_idx  # set the scene to the right index
+            # recorded_frame = self.recorded_scene_dataset_batch[scene_idx][state_index]
+            # frame["image"][-1] = recorded_frame["image"][-1]
             frame_batch.append(frame)
         return frame_batch
 

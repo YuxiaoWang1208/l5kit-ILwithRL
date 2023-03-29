@@ -255,6 +255,40 @@ def generate_agent_sample(
 
     history_vels_mps, future_vels_mps = compute_agent_velocity(history_positions_m, future_positions_m, step_time)
 
+    # ==== Turns  info ====
+    image_shape = np.array(input_im.shape)
+    image_shape[-1] = 1
+    turns_channel = np.zeros(shape=image_shape, dtype=np.uint8)
+    new_img_buffer_shape = np.array(input_im.shape)
+    new_img_buffer_shape[-1] += 1
+    new_img_buffer = np.zeros(shape=new_img_buffer_shape, dtype=np.uint8)
+    # 利用categorize_scenes的函数实时打turns标签
+    yaws_to_judge = future_yaws_rad  # tensor(batch_size, turns_num_frames, 1)
+    TURN_THRESH1 = 0.5236  # Threshold in rads to determine front or side front
+    TURN_THRESH2 = 1.0472  # Threshold in rads to determine side front or side
+
+    yaw_diff = yaws_to_judge[1:] - yaws_to_judge[:-1]
+    if TURN_THRESH2 >= np.sum(yaw_diff) >= TURN_THRESH1:
+        turns = "left front"
+        turns_channel[:int(image_shape[0]/2), :image_shape[1], :image_shape[2]].fill(1)
+        turns_channel[:image_shape[0], :int(image_shape[1]/2), :image_shape[2]].fill(1)
+    elif -TURN_THRESH2 <= np.sum(yaw_diff) <= -TURN_THRESH1:
+        turns = "right front"
+        turns_channel[:int(image_shape[0]/2), :image_shape[1], :image_shape[2]].fill(1)
+        turns_channel[:image_shape[0], int(image_shape[1]/2):, :image_shape[2]].fill(1)
+    elif np.sum(yaw_diff) >= TURN_THRESH2:
+        turns = "left"
+        turns_channel[:image_shape[0], :int(image_shape[1]/2), :image_shape[2]].fill(1)
+    elif np.sum(yaw_diff) <= -TURN_THRESH2:
+        turns = "right"
+        turns_channel[:image_shape[0], int(image_shape[1]/2):, :image_shape[2]].fill(1)
+    else:
+        turns = "front"
+        turns_channel[:int(image_shape[0]/2), :image_shape[1], :image_shape[2]].fill(1)
+    new_img_buffer = np.concatenate([input_im, turns_channel], axis=-1)
+    input_im = new_img_buffer
+    # print(agents_past_polys[0, 0, -1])
+
     result = {
         "frame_index": state_index,
         "image": input_im,
@@ -264,6 +298,7 @@ def generate_agent_sample(
         "target_availabilities": future_availabilities,
         "history_positions": history_positions_m,
         "history_yaws": history_yaws_rad,
+        "future_yaws": future_yaws_rad,
         "history_velocities": history_vels_mps,
         "history_availabilities": history_availabilities,
         "world_to_image": raster_from_world,  # TODO deprecate

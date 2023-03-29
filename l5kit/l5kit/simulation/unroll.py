@@ -83,6 +83,7 @@ class SimulationOutputCLE:
 
         self.simulated_ego_states = self.build_trajectory_states(self.simulated_ego)
         self.recorded_ego_states = self.build_trajectory_states(self.recorded_ego)
+        self.all_recorded_ego_states = self.build_trajectory_states(self.recorded_ego)
 
         self.ego_ins_outs = ego_ins_outs[scene_id]
         self.agents_ins_outs = agents_ins_outs[scene_id]
@@ -163,7 +164,8 @@ class ClosedLoopSimulator:
         if sim_cfg.use_ego_gt and mode == ClosedLoopSimulatorModes.GYM:
             raise ValueError("ego has to be simulated when using gym environment")
 
-        self.model_ego = torch.nn.Sequential().to(device) if model_ego is None else model_ego.to(device)
+        # self.model_ego = torch.nn.Sequential().to(device) if model_ego is None else model_ego.to(device)
+        self.model_ego = model_ego
         self.model_agents = torch.nn.Sequential().to(device) if model_agents is None else model_agents.to(device)
 
         self.device = device
@@ -335,3 +337,101 @@ class ClosedLoopSimulator:
         pred_yaws = np.expand_dims(yaw, -1) + output_dict["yaws"][:, :1, 0]
 
         dataset.set_ego(frame_idx, 0, pred_trs, pred_yaws)
+
+class PredPPOClosedLoopSimulator(ClosedLoopSimulator):
+    def __init__(self, sim_cfg: SimulationConfig, dataset: EgoDataset,
+                 device: torch.device,
+                 model_ego: Optional[torch.nn.Module] = None,
+                 model_agents: Optional[torch.nn.Module] = None,
+                 keys_to_exclude: Tuple[str] = ("image",),
+                 mode: int = ClosedLoopSimulatorModes.L5KIT):
+        
+        super().__init__(sim_cfg, dataset,
+                 device,
+                 model_ego,
+                 model_agents,
+                 keys_to_exclude,
+                 mode)
+
+    def unroll(self, origin_env, scene_indices: List[int]) -> List[SimulationOutput]:
+        """
+        Simulate the dataset for the given scene indices
+        :param scene_indices: the scene indices we want to simulate
+        :return: the simulated dataset
+        """
+        sim_dataset = SimulationDataset.from_dataset_indices(self.dataset, scene_indices, self.sim_cfg)
+
+        agents_ins_outs: DefaultDict[int, List[List[UnrollInputOutput]]] = defaultdict(list)
+        ego_ins_outs: DefaultDict[int, List[UnrollInputOutput]] = defaultdict(list)
+
+        for frame_index in tqdm(range(len(sim_dataset)), disable=not self.sim_cfg.show_info):
+            next_frame_index = frame_index + 1
+            should_update = next_frame_index != len(sim_dataset)
+
+            # AGENTS
+            if not self.sim_cfg.use_agents_gt:
+                agents_input = sim_dataset.rasterise_agents_frame_batch(frame_index)
+                if len(agents_input):  # agents may not be available
+                    agents_input_dict = default_collate(list(agents_input.values()))
+                    agents_output_dict = self.model_agents(move_to_device(agents_input_dict, self.device))
+
+                    # for update we need everything as numpy
+                    agents_input_dict = move_to_numpy(agents_input_dict)
+                    agents_output_dict = move_to_numpy(agents_output_dict)
+
+                    if should_update:
+                        self.update_agents(sim_dataset, next_frame_index, agents_input_dict, agents_output_dict)
+
+                    # update input and output buffers
+                    agents_frame_in_out = self.get_agents_in_out(agents_input_dict, agents_output_dict,
+                                                                 self.keys_to_exclude)
+                    for scene_idx in scene_indices:
+                        agents_ins_outs[scene_idx].append(agents_frame_in_out.get(scene_idx, []))
+
+            # EGO
+            if not self.sim_cfg.use_ego_gt:
+                ego_input = sim_dataset.rasterise_frame_batch(frame_index)
+                ego_input_dict = default_collate(ego_input)
+                ego_model_input_dict = {'image': ego_input_dict['image']}
+                actions, _ = self.model_ego.predict(move_to_device(ego_model_input_dict, self.device), deterministic=True)
+
+                # xy = ego_input_dict["target_positions"].cpu().numpy()
+                # yaw = ego_input_dict["target_yaws"].cpu().numpy()
+                # actions = np.expand_dims(np.concatenate([xy, yaw], axis=-1)[:, 0], axis=0)
+                # ego_output = actions
+
+                actions = self.rescale(origin_env, actions)
+                ego_output = np.expand_dims(actions, axis=1)
+                ego_output_dict = {'positions': ego_output[..., :2], 'yaws': np.expand_dims(ego_output[..., 2], -1)}
+
+                ego_input_dict = move_to_numpy(ego_input_dict)
+                # ego_output_dict = move_to_numpy(ego_output_dict)
+
+                if should_update:
+                    self.update_ego(sim_dataset, next_frame_index, ego_input_dict, ego_output_dict)
+
+                ego_frame_in_out = self.get_ego_in_out(ego_input_dict, ego_output_dict, self.keys_to_exclude)
+                for scene_idx in scene_indices:
+                    ego_ins_outs[scene_idx].append(ego_frame_in_out[scene_idx])
+
+        simulated_outputs: List[SimulationOutput] = []
+        for scene_idx in scene_indices:
+            simulated_outputs.append(SimulationOutput(scene_idx, sim_dataset, ego_ins_outs, agents_ins_outs))
+        return simulated_outputs
+    
+    def rescale(self, env, action):
+        # get resacle params and rescale the targets
+        rescale_action = env.get_attr('rescale_action')[0]
+        use_kinematic = env.get_attr('use_kinematic')[0]
+        if rescale_action:
+            if use_kinematic:
+                kin_rescale = env.get_attr('kin_rescale')[0]
+                action[..., 0] = kin_rescale.steer_scale * action[..., 0]
+                action[..., 1] = kin_rescale.acc_scale * action[..., 1]
+            else:
+                non_kin_rescale = env.get_attr('non_kin_rescale')[0]
+                action[..., 0] = non_kin_rescale.x_mu + non_kin_rescale.x_scale * action[..., 0]
+                action[..., 1] = non_kin_rescale.y_mu + non_kin_rescale.y_scale * action[..., 1]
+                action[..., 2] = non_kin_rescale.yaw_mu + non_kin_rescale.yaw_scale * action[..., 2]
+        
+        return action

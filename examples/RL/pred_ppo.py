@@ -95,7 +95,7 @@ class PRED_PPO(PPO):
         clip_range_vf: Union[None, float, Schedule] = None,
         normalize_advantage: bool = True,
         il_coef: float = 1.0,  # 0.0 1.0
-        ent_coef: float = 0.0,  # 0.0 0.01
+        ent_coef: float = 0.0,  # 0.0 0.05
         vf_coef: float = 0.5,  # 0.5 0.1
         max_grad_norm: float = 0.5,
         use_sde: bool = False,
@@ -451,6 +451,7 @@ class PRED_PPO(PPO):
                     )
                 # Value loss using the TD(gae_lambda) target
                 value_loss = F.mse_loss(rollout_data.returns, values_pred)
+                # print(value_loss, log_prob, entropy)
                 value_losses.append(value_loss.item())
                 self.V_losses_mean = (self.V_losses_mean * self._n_updates + value_loss.item()) / (self._n_updates+1)
 
@@ -463,7 +464,7 @@ class PRED_PPO(PPO):
 
                 entropy_losses.append(entropy_loss.item())
 
-                RL_loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss  # PPO
+                RL_loss = 1 * policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss  # PPO
                 # RL_loss = self.ent_coef * entropy_loss + self.vf_coef * value_loss  # no policy PPO
                 # RL_loss = self.il_coef * il_loss + policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss  # ILPPO
                 # RL_loss = self.il_coef * il_loss + 0.0*(policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss)  # IL
@@ -471,7 +472,8 @@ class PRED_PPO(PPO):
                 self.RL_losses_mean = (self.RL_losses_mean * self._n_updates + RL_loss.item()) / (self._n_updates+1)
                 V_loss = self.vf_coef * value_loss
 
-                total_loss = IL_loss + 0.1 * RL_loss
+                total_loss = IL_loss + 1 * RL_loss
+                # total_loss = V_loss
 
                 # Calculate approximate form of reverse KL Divergence for early stopping
                 # see issue #417: https://github.com/DLR-RM/stable-baselines3/issues/417
@@ -514,7 +516,7 @@ class PRED_PPO(PPO):
             # self.logger.record("train/imitation_loss", np.mean(il_losses))
             self.logger.record("train/entropy_loss", np.mean(entropy_losses))
             self.logger.record("train/policy_gradient_loss", np.mean(pg_losses))
-            self.logger.record("train/value_loss", self.V_losses_mean) # np.mean(value_losses))
+            self.logger.record("train/value_loss", value_loss.item()) # self.V_losses_mean) # np.mean(value_losses))
             self.logger.record("train/approx_kl", np.mean(approx_kl_divs))
             self.logger.record("train/clip_fraction", np.mean(clip_fractions))
             self.logger.record("train/IL_loss", IL_loss.item())
@@ -541,7 +543,7 @@ class PRED_PPO(PPO):
 
             # ==== save the model ====
             # from pred_ppo_training import MODEL_PATH
-            if self._n_updates % 5000 == 0:
+            if self._n_updates % 1000 == 0:
                 model_path = f"{os.getcwd()}/models_" + os.environ["DATE"] + f"/{self._n_updates}.pt"  # pt zip
                 self.save(model_path)
 

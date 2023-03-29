@@ -406,7 +406,7 @@ class PRED_12(PPO):
             # ==== save the model ====
             # from pred_12_training import MODEL_PATH
             if self._n_updates % 5000 == 0:
-                model_path = f"{os.getcwd()}/models_" + "pretrain_1000" + f"/{self._n_updates}.pt"  # pt zip
+                model_path = f"{os.getcwd()}/models_" + "pretrain_withturn1" + f"/{self._n_updates}.pt"  # pt zip
                 self.save(model_path)
 
             self._n_updates += 1

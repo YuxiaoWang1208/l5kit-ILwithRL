@@ -1,6 +1,9 @@
 # Config format schema number
 format_version: 4
 
+# Add Turns info to another channel
+turns_channel: 1
+
 ###################
 ## Model options
 model_params:
@@ -84,6 +87,12 @@ train_data_loader:
 val_data_loader:
   key: "scenes/sample.zarr"  # "scenes/sample.zarr"
   perturbation: False
+
+scale_data_loader:
+  key: "scenes/validate.zarr"  # "scenes/sample.zarr"
+  # batch_size: 64  # Use the same batch size of RL rollout buffer
+  shuffle: True
+  perturbation: True
 
 ###################
 ## Gym params

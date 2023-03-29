@@ -44,7 +44,7 @@ class CLEMetricSet(metric_set.L5MetricSet):
         """
         return [
             metrics.DisplacementErrorL2Metric(),
-            metrics.DistanceToRefTrajectoryMetric(),
+            metrics.DistanceToRefTrajectoryMetric(scene_fraction=1.0),
             metrics.CollisionFrontMetric(),
             metrics.CollisionRearMetric(),
             metrics.CollisionSideMetric(),

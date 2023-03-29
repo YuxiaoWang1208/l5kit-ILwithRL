@@ -193,8 +193,8 @@ class EvaluationPlan:
             results[metric_validator.validator_name] = validator_result
 
         # If we should stop at interventions, given a list of interventions
-        if len(self.intervention_validators) > 0:
-            results = self.process_interventions(results)
+        # if len(self.intervention_validators) > 0:
+        #     results = self.process_interventions(results)
 
         return results
 

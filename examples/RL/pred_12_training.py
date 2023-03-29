@@ -5,6 +5,7 @@ import sys
 project_path = "/root/zhufenghua12/wangyuxiao/l5kit-wyx/l5kit"
 print("project path: ", project_path)
 sys.path.append(project_path)
+import torch as th
 
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
@@ -150,6 +151,27 @@ if __name__ == "__main__":
                     # n_IL_epochs=args.n_IL_epochs, n_RL_epochs=args.n_RL_epochs,
                     n_epochs = args.n_epochs, weights_scaling=[1., 1., 1.],
                     clip_range=clip_schedule, batch_size=args.batch_size, seed=args.seed, gae_lambda=args.gae_lambda)
+
+    # # use pretrained 12 steps prediction model
+    # device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
+    # pre_model_path = "./models_pretrain_1000/" + str(100000) + ".pt"
+    # pre_model = PRED_12.load(pre_model_path, env, device=device, clip_range=clip_schedule, learning_rate=args.lr)
+    # pre_model_paras = pre_model.get_parameters()
+    # # print(pre_model.policy.optimizer.state_dict()['param_groups'])
+    # # print(model.policy.optimizer.state_dict()['param_groups'])
+    # # model.policy.optimizer = pre_model.policy.optimizer
+    # # del pre_model_paras['policy.optimizer']
+    # # for key in pre_model_paras['policy'].keys():
+    # #     # if 'pred_net' in key:
+    # #     #     para = key.split('.')[1]
+    # #     #     new_para = 'action_net.' + para
+    # #     #     pre_model_paras['policy'][new_para] = pre_model_paras['policy'][key][:3, ...]
+    # #     #     pre_model_paras['policy'][key] = pre_model_paras['policy'][key][3:, ...]
+    # #     if 'pi_features_extractor' in key:
+    # #         para = key.split('.', 1)[1]
+    # #         new_para = 'vf_features_extractor.' + para
+    # #         pre_model_paras['policy'][new_para] = pre_model_paras['policy'][key]
+    # model.set_parameters(pre_model_paras, exact_match=False)
 
     # make eval env
     eval_sim_cfg = SimulationConfigGym()

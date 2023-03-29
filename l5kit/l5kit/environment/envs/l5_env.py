@@ -134,7 +134,7 @@ class L5Env(gym.Env):
         # rasterisation
         rasterizer = build_rasterizer(cfg, dm)
         raster_size = cfg["raster_params"]["raster_size"][0]
-        n_channels = rasterizer.num_channels()
+        n_channels = rasterizer.num_channels() + cfg["turns_channel"]
 
         # # vectorization
         # self.vectorizer = build_vectorizer(cfg, dm)
@@ -149,6 +149,11 @@ class L5Env(gym.Env):
             loader_key = cfg["val_data_loader"]["key"]
         dataset_zarr = ChunkedDataset(dm.require(loader_key)).open()
         self.dataset = EgoDataset(cfg, dataset_zarr, rasterizer)
+
+        scale_loader_key = cfg["scale_data_loader"]["key"]
+        scale_dataset_zarr = ChunkedDataset(dm.require(scale_loader_key)).open()
+        self.scale_dataset = EgoDataset(cfg, scale_dataset_zarr, rasterizer)
+        # print(len(self.dataset))
 
         # Define action and observation space
         # Continuous Action Space: gym.spaces.Box (X, Y, Yaw * number of future states)
@@ -171,7 +176,7 @@ class L5Env(gym.Env):
 
         # self.reward = reward if reward is not None else L2DisplacementYawReward()
         self.reward = CollisionOffroadReward(rew_clip_thresh=2.0)
-        # self.reward1 = L2DisplacementYawReward()
+        self.reward1 = L2DisplacementYawReward()
 
         self.max_scene_id = cfg["gym_params"]["max_scene_id"]
         if not self.train:
@@ -229,7 +234,12 @@ class L5Env(gym.Env):
         self.ego_ins_outs: DefaultDict[int, List[UnrollInputOutput]] = defaultdict(list)
 
         # Select Scene ID
-        self.scene_index = self.np_random.randint(0, self.max_scene_id)
+        # self.scene_index = self.np_random.randint(0, self.max_scene_id)
+        bad_case = np.array([6,11,13,14,18,35,38,51,52,63,65,67,81,85,90,91,97,98])
+        bad_case = np.array([6,13,14,18,35,38,63,85,91,97])
+        bad_case = np.array([14])
+        bad_case = np.array([6])
+        self.scene_index = self.np_random.choice(bad_case)
         if self.reset_scene_id is not None:
             self.scene_index = min(self.reset_scene_id, self.max_scene_id - 1)
             self.reset_scene_id += 1
@@ -330,13 +340,19 @@ class L5Env(gym.Env):
         # map_features = self.vectorizer._vectorize_map(ego_centroid, ego_from_world, history_tl_faces)
         # lanes_mid = map_features['lanes_mid'][..., :2]
         lanes_mid = 0.0
-        reward = self.reward.get_reward(frame_ego, frame_agents, lanes_mid)
+        reward = self.reward.get_reward(self.frame_index, [simulated_outputs], frame_ego, frame_agents, lanes_mid)
+        # reward = self.reward.get_reward(frame_ego, frame_agents, lanes_mid)
         # reward1 = self.reward1.get_reward(self.frame_index, [simulated_outputs])
-        # reward['total'] = reward['total'] + 0.001*reward1['total']
-        # print(reward1['total'])
+        # reward['total'] = reward['total'] + 0.1 * reward1['total']
 
         # done is True when episode ends
         done = episode_over
+
+        # # done is True when episode ends or off road happens
+        # if self.train:
+        #     done = episode_over or reward["off-road"] < 0 or reward["collision"] < 0
+        # else:
+        #     done = episode_over
 
         # Optionally we can pass additional info
         # We are using "info" to output rewards and simulated outputs (during evaluation)
@@ -423,7 +439,7 @@ class L5Env(gym.Env):
         scene_ids = list(range(self.max_scene_id)) if not self.overfit else [self.overfit_scene_id]
         if len(scene_ids) > max_num_scenes:  # If too many scenes, CPU crashes
             scene_ids = scene_ids[:max_num_scenes]
-        sim_dataset = SimulationDataset.from_dataset_indices(self.dataset, scene_ids, self.sim_cfg)
+        sim_dataset = SimulationDataset.from_dataset_indices(self.scale_dataset, scene_ids, self.sim_cfg)
         return calculate_non_kinematic_rescale_params(sim_dataset)
 
     def _convert_action_to_ego_output(self, action: np.ndarray) -> Dict[str, np.ndarray]:

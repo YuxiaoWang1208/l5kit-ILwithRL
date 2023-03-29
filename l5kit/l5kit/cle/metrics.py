@@ -177,7 +177,7 @@ class DistanceToRefTrajectoryMetric(SupportsMetricCompute):
         # Shape = [Timesteps, 7]
         simulated_scene_ego_state = simulation_output.simulated_ego_states
         simulated_centroid = simulated_scene_ego_state[:, :2]  # [Timesteps, 2]
-        observed_ego_states = simulation_output.recorded_ego_states[:, :2]
+        observed_ego_states = simulation_output.all_recorded_ego_states[:, :2]
 
         if len(observed_ego_states) < len(simulated_centroid):
             raise ValueError("More simulated timesteps than observed.")

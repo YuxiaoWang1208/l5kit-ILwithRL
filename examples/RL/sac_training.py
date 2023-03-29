@@ -6,7 +6,7 @@ project_path = "/root/zhufenghua12/wangyuxiao/l5kit-wyx/l5kit"
 print("project path: ", project_path)
 sys.path.append(project_path)
 
-from stable_baselines3 import PPO
+from stable_baselines3 import SAC
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.utils import get_linear_fn
@@ -15,6 +15,9 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from l5kit.environment.envs.l5_env import SimulationConfigGym
 from l5kit.environment.feature_extractor import CustomFeatureExtractor
 from l5kit.environment.callbacks import L5KitEvalCallback
+
+import torch as th
+
 
 # Dataset is assumed to be on the folder specified
 # in the L5KIT_DATA_FOLDER environment variable
@@ -25,7 +28,7 @@ if "L5KIT_DATA_FOLDER" not in os.environ:
     raise KeyError("L5KIT_DATA_FOLDER environment variable not set")
 
 # print(os.environ.keys())
-config_path = os.getcwd() + "/pred_ppo_config.yaml"
+config_path = os.getcwd() + "/sac_config.yaml"
 os.environ.setdefault('CONFIG_PATH', config_path)
 # print(os.environ["CONFIG_PATH"])
 
@@ -37,7 +40,11 @@ d = datetime.datetime.now() + datetime.timedelta(hours=8)
 date = d.strftime('%Y-%m-%d_%H-%M')
 os.environ.setdefault('DATE', date)
 
-lr = 3e-4  # 3e-4 3e-3
+'''from pred_ppo import PRED_PPO
+from pred_12 import PRED_12'''
+
+
+lr = 3e-4  # 3e-4 1e-3 6e-5
 from l5kit.configs import load_config_data
 
 
@@ -46,9 +53,9 @@ if __name__ == "__main__":
     parser.add_argument('--config', type=str,
                         default='./gym_config.yaml',
                         help='Path to L5Kit environment config file')
-    parser.add_argument('-o', '--output', type=str, default='PPO',
+    parser.add_argument('-o', '--output', type=str, default='SAC',
                         help='File name for saving model states')
-    parser.add_argument('--load', type=str, # default='./logs/PPO_100000_steps.zip',
+    parser.add_argument('--load', type=str, # default='./models',
                         help='Path to load model and continue training')
     parser.add_argument('--simnet', action='store_true',
                         help='Use simnet to control agents')
@@ -58,17 +65,21 @@ if __name__ == "__main__":
                         help='Tensorboard log folder')
     parser.add_argument('--save_path', default='./logs_' + date + '/', type=str,
                         help='Folder to save model checkpoints')
-    parser.add_argument('--save_freq', default=10000, type=int,  # 100000 1000
+    parser.add_argument('--save_freq', default=1000000, type=int,  # 100000 1000
                         help='Frequency to save model checkpoints')
-    parser.add_argument('--eval_freq', default=10000, type=int,  # 100000 1000
+    parser.add_argument('--eval_freq', default=10000, type=int,  # 10000 1000
                         help='Frequency to evaluate model state')
     parser.add_argument('--n_eval_episodes', default=1, type=int,  # 10
                         help='Number of episodes to evaluate')
     parser.add_argument('--n_steps', default=1000000, type=int,
                         help='Total number of training time steps')
-    parser.add_argument('--num_rollout_steps', default=256, type=int,
+    parser.add_argument('--num_rollout_steps', default=256, type=int,  # 256
                         help='Number of rollout steps per environment per model update')
-    parser.add_argument('--n_epochs', default=50, type=int,
+    parser.add_argument('--n_IL_epochs', default=10, type=int,
+                        help='Number of model Imitation training epochs per update')
+    parser.add_argument('--n_RL_epochs', default=50, type=int,  # 50 10
+                        help='Number of model Reinforcement and Imitation training epochs per update')
+    parser.add_argument('--n_epochs', default=50, type=int,  # 250 50
                         help='Number of model training epochs per update')
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Mini batch size of model update')
@@ -138,19 +149,52 @@ if __name__ == "__main__":
 
     # define model
     clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
+
+    model_path = "./models_" + "2023-02-24_10-04" + "/" + "2000" + ".pt"
+    device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
+    clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
     if args.load is not None:
-        model = PPO.load(args.load, env, clip_range=clip_schedule, learning_rate=args.lr)
+        model = SAC.load(model_path, env, device=device, clip_range=clip_schedule, learning_rate=args.lr)
     else:
-        model = PPO("MultiInputPolicy", env, policy_kwargs=policy_kwargs, verbose=1, n_steps=args.num_rollout_steps,
-                    learning_rate=args.lr, gamma=args.gamma, tensorboard_log=args.tb_log, n_epochs=args.n_epochs,
-                    clip_range=clip_schedule, batch_size=args.batch_size, seed=args.seed, gae_lambda=args.gae_lambda)
+        '''model = SAC("MultiInputPredPolicy", env, future_num_frames=cfg['model_params']['future_num_frames'],
+                    policy_kwargs=policy_kwargs, verbose=1, n_steps=args.num_rollout_steps,
+                    learning_rate=args.lr, gamma=args.gamma, tensorboard_log=args.tb_log,
+                    # n_IL_epochs=args.n_IL_epochs, 
+                    n_RL_epochs=args.n_RL_epochs,
+                    n_epochs = args.n_epochs, weights_scaling=[1., 1., 1.],
+                    clip_range=clip_schedule, batch_size=args.batch_size, seed=args.seed, gae_lambda=args.gae_lambda)'''
+        model = SAC("MultiInputPolicy", env,
+                    policy_kwargs=policy_kwargs, verbose=1,
+                    learning_rate=args.lr, gamma=args.gamma, tensorboard_log=args.tb_log,
+                    gradient_steps = 50,
+                    batch_size=args.batch_size, seed=args.seed,)
+
+    '''# use pretrained 12 steps prediction model
+    pre_model_path = "./models_pretrain_1000/" + str(100000) + ".pt"
+    pre_model = PRED_12.load(pre_model_path, env, device=device, clip_range=clip_schedule, learning_rate=args.lr)
+    pre_model_paras = pre_model.get_parameters()
+    # print(pre_model.policy.optimizer.state_dict()['param_groups'])
+    # print(model.policy.optimizer.state_dict()['param_groups'])
+    # model.policy.optimizer = pre_model.policy.optimizer
+    # del pre_model_paras['policy.optimizer']
+    for key in pre_model_paras['policy'].keys():
+        # if 'pred_net' in key:
+        #     para = key.split('.')[1]
+        #     new_para = 'action_net.' + para
+        #     pre_model_paras['policy'][new_para] = pre_model_paras['policy'][key][:3, ...]
+        #     pre_model_paras['policy'][key] = pre_model_paras['policy'][key][3:, ...]
+        if 'pi_features_extractor' in key:
+            para = key.split('.', 1)[1]
+            new_para = 'vf_features_extractor.' + para
+            pre_model_paras['policy'][new_para] = pre_model_paras['policy'][key]
+    model.set_parameters(pre_model_paras, exact_match=False)'''
 
     # make eval env
     eval_sim_cfg = SimulationConfigGym()
     eval_sim_cfg.num_simulation_steps = None
     eval_sim_cfg.use_agents_gt = (not args.simnet)
     eval_env_kwargs = {'env_config_path': args.config, 'use_kinematic': args.kinematic, 'return_info': True,
-                       'train': False, 'sim_cfg': eval_sim_cfg, 'simnet_model_path': args.simnet_model_path}
+                       'train': True, 'sim_cfg': eval_sim_cfg, 'simnet_model_path': args.simnet_model_path}  #'train': False
     eval_env = make_vec_env("L5-CLE-v0", env_kwargs=eval_env_kwargs, n_envs=args.n_eval_envs,
                             vec_env_cls=SubprocVecEnv, vec_env_kwargs={"start_method": "fork"})
 
@@ -169,4 +213,4 @@ if __name__ == "__main__":
                                       scene_id_to_type_path=args.scene_id_to_type_path)
 
     # train
-    model.learn(args.n_steps, callback=[checkpoint_callback, eval_callback])
+    model.learn(args.n_steps, callback=[checkpoint_callback, eval_callback], log_interval=2)

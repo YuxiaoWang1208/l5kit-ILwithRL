@@ -73,25 +73,25 @@ if __name__ == "__main__":
                         help='Number of episodes to evaluate')
     parser.add_argument('--n_steps', default=1000000, type=int,
                         help='Total number of training time steps')
-    parser.add_argument('--num_rollout_steps', default=256, type=int,  # 256
+    parser.add_argument('--num_rollout_steps', default=128, type=int,  # 128 256
                         help='Number of rollout steps per environment per model update')
     parser.add_argument('--n_IL_epochs', default=10, type=int,
                         help='Number of model Imitation training epochs per update')
     parser.add_argument('--n_RL_epochs', default=50, type=int,  # 50 10
                         help='Number of model Reinforcement and Imitation training epochs per update')
-    parser.add_argument('--n_epochs', default=50, type=int,  # 250 50
+    parser.add_argument('--n_epochs', default=50, type=int,  # 250 50 10
                         help='Number of model training epochs per update')
-    parser.add_argument('--batch_size', default=64, type=int,
+    parser.add_argument('--batch_size', default=64, type=int,  # 64 128
                         help='Mini batch size of model update')
     parser.add_argument('--lr', default=lr, type=float,  # 3e-4
                         help='Learning rate')
-    parser.add_argument('--gamma', default=0.95, type=float,
+    parser.add_argument('--gamma', default=0.95, type=float,  # 0.95
                         help='Discount factor')
-    parser.add_argument('--gae_lambda', default=0.90, type=float,
+    parser.add_argument('--gae_lambda', default=0.90, type=float,  # 0.90
                         help='Factor for trade-off of bias vs variance for Generalized Advantage Estimator')
-    parser.add_argument('--clip_start_val', default=0.1, type=float,
+    parser.add_argument('--clip_start_val', default=0.1, type=float,  # 0.1 0.05
                         help='Start value of clipping in PPO')
-    parser.add_argument('--clip_end_val', default=0.001, type=float,
+    parser.add_argument('--clip_end_val', default=0.001, type=float,  # 0.001
                         help='End value of clipping in PPO')
     parser.add_argument('--clip_progress_ratio', default=1.0, type=float,
                         help='Training progress ratio to end linear schedule of clipping')
@@ -99,9 +99,9 @@ if __name__ == "__main__":
                         help='Model architecture of feature extractor')
     parser.add_argument('--features_dim', default=128, type=int,
                         help='Output dimension of feature extractor')
-    parser.add_argument('--n_envs', default=4, type=int,
+    parser.add_argument('--n_envs', default=8, type=int,  # 4 8
                         help='Number of parallel environments')
-    parser.add_argument('--n_eval_envs', default=4, type=int,
+    parser.add_argument('--n_eval_envs', default=2, type=int,  # 4
                         help='Number of parallel environments for evaluation')
     parser.add_argument('--eps_length', default=128, type=int,  # 32 128
                         help='Episode length of gym rollouts')
@@ -149,10 +149,11 @@ if __name__ == "__main__":
 
     # define model
     clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
+    # vf_clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
 
     model_path = "./models_" + "2023-02-24_10-04" + "/" + "2000" + ".pt"
     device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
-    clip_schedule = get_linear_fn(args.clip_start_val, args.clip_end_val, args.clip_progress_ratio)
+    
     if args.load is not None:
         model = PRED_PPO.load(model_path, env, device=device, clip_range=clip_schedule, learning_rate=args.lr)
     else:
@@ -162,31 +163,49 @@ if __name__ == "__main__":
                     # n_IL_epochs=args.n_IL_epochs, 
                     n_RL_epochs=args.n_RL_epochs,
                     n_epochs = args.n_epochs, weights_scaling=[1., 1., 1.],
-                    clip_range=clip_schedule, batch_size=args.batch_size, seed=args.seed, gae_lambda=args.gae_lambda)
+                    clip_range=clip_schedule,
+                    #  clip_range_vf=0.2,
+                    batch_size=args.batch_size, seed=args.seed, gae_lambda=args.gae_lambda)
+
+    # # use pretrained 12 steps prediction model
+    # pre_model_path = "./models_pretrain_withturn1/" + str(15000) + ".pt"
+    # pre_model = PRED_12.load(pre_model_path, env, device=device, clip_range=clip_schedule, learning_rate=args.lr)
+    # pre_model_paras = pre_model.get_parameters()
+    # # print(pre_model.policy.optimizer.state_dict()['param_groups'])
+    # # print(model.policy.optimizer.state_dict()['param_groups'])
+    # # model.policy.optimizer = pre_model.policy.optimizer
+    # # del pre_model_paras['policy.optimizer']
+    # for key in pre_model_paras['policy'].keys():
+    #     # if 'pred_net' in key:
+    #     #     para = key.split('.')[1]
+    #     #     new_para = 'action_net.' + para
+    #     #     pre_model_paras['policy'][new_para] = pre_model_paras['policy'][key][:3, ...]
+    #     #     pre_model_paras['policy'][key] = pre_model_paras['policy'][key][3:, ...]
+    #     if 'pi_features_extractor' in key:
+    #         para = key.split('.', 1)[1]
+    #         new_para = 'vf_features_extractor.' + para
+    #         pre_model_paras['policy'][new_para] = pre_model_paras['policy'][key]
+    # model.set_parameters(pre_model_paras, exact_match=False)
+
+    # for para in model.policy.named_parameters():
+    #     # if 'pred_net' in key:
+    #     #     para = key.split('.')[1]
+    #     #     new_para = 'action_net.' + para
+    #     #     pre_model_paras['policy'][new_para] = pre_model_paras['policy'][key][:3, ...]
+    #     #     pre_model_paras['policy'][key] = pre_model_paras['policy'][key][3:, ...]
+    #     # print(para[0])
+    #     if 'features_extractor' in para[0] and 'vf' not in para[0] or 'mlp_extractor.policy_net' in para[0]:
+    #         para[1].requires_grad = False
+
 
     # use pretrained 12 steps prediction model
-    pre_model_path = "./models_pretrain_1000/" + str(100000) + ".pt"
-    pre_model = PRED_12.load(pre_model_path, env, device=device, clip_range=clip_schedule, learning_rate=args.lr)
-    pre_model_paras = pre_model.get_parameters()
-    # print(pre_model.policy.optimizer.state_dict()['param_groups'])
-    # print(model.policy.optimizer.state_dict()['param_groups'])
-    # model.policy.optimizer = pre_model.policy.optimizer
-    # del pre_model_paras['policy.optimizer']
-    for key in pre_model_paras['policy'].keys():
-        # if 'pred_net' in key:
-        #     para = key.split('.')[1]
-        #     new_para = 'action_net.' + para
-        #     pre_model_paras['policy'][new_para] = pre_model_paras['policy'][key][:3, ...]
-        #     pre_model_paras['policy'][key] = pre_model_paras['policy'][key][3:, ...]
-        if 'pi_features_extractor' in key:
-            para = key.split('.', 1)[1]
-            new_para = 'vf_features_extractor.' + para
-            pre_model_paras['policy'][new_para] = pre_model_paras['policy'][key]
-    model.set_parameters(pre_model_paras, exact_match=False)
+    model_path = "./models_2023-03-29_15-02/" + str(1000) + ".pt"
+    model = PRED_PPO.load(model_path, env, device=device, clip_range=clip_schedule, learning_rate=args.lr)
+    
 
     # make eval env
     eval_sim_cfg = SimulationConfigGym()
-    eval_sim_cfg.num_simulation_steps = None
+    eval_sim_cfg.num_simulation_steps = args.eps_length + 1
     eval_sim_cfg.use_agents_gt = (not args.simnet)
     eval_env_kwargs = {'env_config_path': args.config, 'use_kinematic': args.kinematic, 'return_info': True,
                        'train': True, 'sim_cfg': eval_sim_cfg, 'simnet_model_path': args.simnet_model_path}  #'train': False
